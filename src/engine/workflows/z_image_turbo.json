@@ -1,0 +1,53 @@
+{
+  "unet": {
+    "inputs": { "unet_name": "z_image_turbo_bf16.safetensors", "weight_dtype": "default" },
+    "class_type": "UNETLoader"
+  },
+  "clip": {
+    "inputs": { "clip_name": "qwen_3_4b.safetensors", "type": "lumina2", "device": "default" },
+    "class_type": "CLIPLoader"
+  },
+  "vae": {
+    "inputs": { "vae_name": "ae.safetensors" },
+    "class_type": "VAELoader"
+  },
+  "pos": {
+    "inputs": { "text": "", "clip": ["clip", 0] },
+    "class_type": "CLIPTextEncode"
+  },
+  "zero": {
+    "inputs": { "conditioning": ["pos", 0] },
+    "class_type": "ConditioningZeroOut"
+  },
+  "latent": {
+    "inputs": { "width": 1024, "height": 1024, "batch_size": 1 },
+    "class_type": "EmptySD3LatentImage"
+  },
+  "sampling": {
+    "inputs": { "shift": 3.0, "model": ["unet", 0] },
+    "class_type": "ModelSamplingAuraFlow"
+  },
+  "sampler": {
+    "inputs": {
+      "seed": 0,
+      "steps": 12,
+      "cfg": 1.0,
+      "sampler_name": "res_multistep",
+      "scheduler": "simple",
+      "denoise": 1.0,
+      "model": ["sampling", 0],
+      "positive": ["pos", 0],
+      "negative": ["zero", 0],
+      "latent_image": ["latent", 0]
+    },
+    "class_type": "KSampler"
+  },
+  "decode": {
+    "inputs": { "samples": ["sampler", 0], "vae": ["vae", 0] },
+    "class_type": "VAEDecode"
+  },
+  "save": {
+    "inputs": { "filename_prefix": "aurora", "images": ["decode", 0] },
+    "class_type": "SaveImage"
+  }
+}

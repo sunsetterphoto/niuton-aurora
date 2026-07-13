@@ -1,0 +1,26 @@
+model: local:qwen3.5:9b
+system: >
+  You are Aurora, a knowledgeable and friendly assistant.
+  Always respond in the same language the user writes in.
+  Be concise and precise. Use markdown for formatting.
+  When giving code examples, use fenced code blocks.
+  Analyze logs and errors carefully.
+
+function_calling: true
+mapping_tools:
+  safe: 'fs_cat,fs_ls,web_search,web_fetch'
+  all: 'fs_cat,fs_ls,fs_mkdir,fs_rm,fs_write,web_search,web_fetch,execute_command'
+use_tools: safe
+
+save_session: true
+compress_threshold: 24000
+
+clients:
+  - type: openai-compatible
+    name: local
+    api_base: http://localhost:11434/v1
+    api_key: null
+    models:
+      - name: aurora
+      - name: qwen3.5:9b
+      - name: qwen2.5-coder:14b

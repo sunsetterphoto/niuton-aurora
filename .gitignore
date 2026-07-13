@@ -1,0 +1,19 @@
+# Build-Artefakte
+build/
+
+# Editor / OS
+.directory
+*.swp
+*~
+.DS_Store
+
+# Assistent-/Dev-Werkzeuge — nicht Teil des Produkts
+CLAUDE.md
+.claude/
+.remember/
+.superpowers/
+docs/superpowers/
+
+# Screenshots / lokale Test-Artefakte
+Tests/
+Bildschirmfoto_*.png

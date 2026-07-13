@@ -1,0 +1,17 @@
+{
+    "KPackageStructure": "Plasma/Applet",
+    "KPlugin": {
+        "Authors": [
+            {
+                "Name": "Samuel (sunsetterphoto)"
+            }
+        ],
+        "Category": "Utilities",
+        "Description": "Aurora - Local AI Assistant",
+        "Icon": "aurora",
+        "Id": "org.kde.aurora",
+        "License": "GPL-3.0",
+        "Name": "Aurora"
+    },
+    "X-Plasma-API-Minimum-Version": "6.0"
+}

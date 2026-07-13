@@ -1,0 +1,11 @@
+[Unit]
+Description=Aurora AI Backend (aichat serve)
+After=network.target
+
+[Service]
+ExecStart=%h/.cargo/bin/aichat --serve 127.0.0.1:8000
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

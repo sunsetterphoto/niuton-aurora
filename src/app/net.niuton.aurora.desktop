@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Aurora
+GenericName=KI-Assistent
+Comment=Lokaler KI-Assistent (Ollama, ComfyUI, Sprache)
+Exec=aurora
+Icon=aurora
+Categories=Utility;Chat;
+Terminal=false

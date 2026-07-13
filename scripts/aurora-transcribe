@@ -1,0 +1,37 @@
+#!/usr/bin/env python3
+"""Aurora STT: WAV-Datei -> Transkript auf stdout (pywhispercpp/whisper.cpp)."""
+import sys
+import os
+
+MODEL = os.path.expanduser("~/.local/share/aurora/whisper/ggml-small.bin")
+
+def main():
+    if len(sys.argv) < 2:
+        print("Usage: aurora-transcribe <audio.wav> [sprache]", file=sys.stderr)
+        return 1
+    wav = sys.argv[1]
+    lang = sys.argv[2] if len(sys.argv) > 2 else "auto"
+    if not os.path.exists(wav):
+        print("Audiodatei nicht gefunden: " + wav, file=sys.stderr)
+        return 1
+    if not os.path.exists(MODEL):
+        print("Whisper-Modell fehlt: " + MODEL, file=sys.stderr)
+        return 1
+
+    # Logs von whisper.cpp unterdrücken, nur Transkript auf stdout
+    from pywhispercpp.model import Model
+    model = Model(MODEL, print_progress=False, print_realtime=False,
+                  redirect_whispercpp_logs_to=None, n_threads=8)
+    kwargs = {}
+    if lang != "auto":
+        kwargs["language"] = lang
+    segments = model.transcribe(wav, **kwargs)
+    text = " ".join(s.text.strip() for s in segments).strip()
+    # Geräusch-Marker wie [Pause], [Musik], (Stille) entfernen
+    import re
+    text = re.sub(r"[\[(][^\])]{0,30}[\])]", "", text).strip()
+    print(text)
+    return 0
+
+if __name__ == "__main__":
+    sys.exit(main())

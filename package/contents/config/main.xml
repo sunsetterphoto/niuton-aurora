@@ -1,0 +1,105 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<kcfg xmlns="http://www.kde.org/standards/kcfg/1.0"
+      xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+      xsi:schemaLocation="http://www.kde.org/standards/kcfg/1.0
+      http://www.kde.org/standards/kcfg/1.0/kcfg.xsd">
+  <kcfgfile name=""/>
+
+  <!-- Nur noch Migrations-/Legacy-Quelle (Spec 2c, Stufe 2c): die KCM-Seiten
+       lesen/schreiben seit Task 4 direkt gegen den geteilten ConfigStore
+       (net.niuton.aurora.core, ~/.config/net.niuton.aurora.rc). Dieses Schema
+       liefert main.qml._migrateConfigOnce() nur noch die appletsrc-Altwerte
+       fuer die einmalige Uebernahme beim ersten Start nach dem Umstieg; es
+       gibt keine cfg_-Konsumenten in package/contents/ui/config/ mehr.
+       maxContext ist ein toter Key (ConfigStore kennt ihn nicht mehr) und
+       bleibt hier nur inert stehen, um Alt-appletsrc nicht zu brechen. -->
+  <group name="General">
+    <entry name="maxContext" type="Int">
+      <default>8192</default>
+    </entry>
+    <entry name="unloadSeconds" type="Int">
+      <default>300</default>
+    </entry>
+    <entry name="twoPhaseToolCalls" type="Bool">
+      <default>false</default>
+    </entry>
+  </group>
+
+  <group name="Tools">
+    <entry name="toolWebSearch" type="String">
+      <default>auto</default>
+    </entry>
+    <entry name="toolReadFile" type="String">
+      <default>auto</default>
+    </entry>
+    <entry name="toolListDir" type="String">
+      <default>auto</default>
+    </entry>
+    <entry name="toolWebFetch" type="String">
+      <default>auto</default>
+    </entry>
+    <entry name="toolWriteFile" type="String">
+      <default>confirm</default>
+    </entry>
+    <entry name="toolRunCommand" type="String">
+      <default>confirm</default>
+    </entry>
+    <entry name="toolMaxRounds" type="Int">
+      <default>5</default>
+    </entry>
+  </group>
+
+  <group name="Models">
+    <entry name="modelLowPower" type="String">
+      <default>gemma4:e2b</default>
+    </entry>
+    <entry name="modelBalanced" type="String">
+      <default>gemma4:e4b</default>
+    </entry>
+    <entry name="modelPerformance" type="String">
+      <default>qwen3.5:9b</default>
+    </entry>
+    <entry name="remoteEnabled" type="Bool">
+      <default>true</default>
+    </entry>
+    <entry name="remoteEndpoint" type="String">
+      <default></default>
+    </entry>
+    <entry name="remoteEndpointFallback" type="String">
+      <default></default>
+    </entry>
+    <entry name="lastSelectedModel" type="String">
+      <default>auto</default>
+    </entry>
+    <entry name="embedModel" type="String">
+      <default>nomic-embed-text</default>
+    </entry>
+  </group>
+
+  <group name="Comfy">
+    <entry name="comfyEnabled" type="Bool">
+      <default>true</default>
+    </entry>
+    <entry name="comfyEndpoint" type="String">
+      <default></default>
+    </entry>
+    <entry name="comfyDefaultModel" type="String">
+      <default>z_image_turbo</default>
+    </entry>
+  </group>
+
+  <group name="Voice">
+    <entry name="ttsVoice" type="String">
+      <default>de_DE-thorsten-high</default>
+    </entry>
+    <entry name="ttsAutoSpeak" type="Bool">
+      <default>false</default>
+    </entry>
+    <entry name="sttLanguage" type="String">
+      <default>auto</default>
+    </entry>
+    <entry name="sttSource" type="String">
+      <default></default>
+    </entry>
+  </group>
+</kcfg>

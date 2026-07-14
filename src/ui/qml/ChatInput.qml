@@ -84,6 +84,15 @@ Rectangle {
 
     Behavior on border.color { ColorAnimation { duration: 150 } }
 
+    // Fokus-unabhängiger Esc-Abbruch: inputField ist während isGenerating disabled
+    // und bekommt daher gar keine Key-Events mehr — der Shortcut wirkt trotzdem,
+    // weil er am immer aktiven Root hängt statt am (dann deaktivierten) Feld.
+    Shortcut {
+        sequences: ["Escape"]
+        enabled: inputRoot.isGenerating
+        onActivated: inputRoot.abortRequested()
+    }
+
     function _send() {
         if (inputField.text.trim() === "") return
         inputRoot.messageSent(inputField.text.trim())
@@ -215,8 +224,9 @@ Rectangle {
                 else inputRoot._send()
             }
             Keys.onEscapePressed: {
+                // Der Abbruch-Zweig läuft jetzt über den Shortcut oben (fokus-unabhängig,
+                // greift auch wenn das Feld während der Generierung disabled ist).
                 if (inputRoot._popupOpen) inputRoot._acDismissed = true
-                else if (inputRoot.isGenerating) inputRoot.abortRequested()
             }
             Keys.onPressed: function(event) {
                 if (event.key === Qt.Key_Tab && inputRoot._popupOpen) {

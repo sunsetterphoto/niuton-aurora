@@ -64,8 +64,17 @@ Item {
 
     ProcessRunner {
         id: transcribeProc
+        // Großzügiger, aber endlicher Timeout: ohne ihn (Default 0 = unbegrenzt)
+        // hängt ein gestörtes aurora-transcribe für immer, recState bleibt bei
+        // "transcribing" und der Mikro-Knopf ist tot (toggle() kennt nur
+        // idle/recording). Bei Zeitüberschreitung killt ProcessRunner die
+        // Prozessgruppe und meldet über finished(..., timedOut=true) — hier
+        // klar von "kein Text erkannt" unterschieden, damit die Fehlermeldung
+        // den echten Hänger benennt statt einer leeren Transkription.
+        timeoutMs: 60000
         onFinished: function(code, out, err, trunc, to) {
             recorder.recState = "idle"
+            if (to) { recorder.errorOccurred("Transkription fehlgeschlagen: Zeitüberschreitung"); return }
             var text = out.trim()
             if (text !== "") recorder.transcriptReady(text)
             else recorder.errorOccurred("Keine Sprache erkannt")

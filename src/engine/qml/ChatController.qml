@@ -88,13 +88,23 @@ QtObject {
     // Vektor auf DIESER (Assistant-)Zeile ablegen; bei jedem anderen Rating den
     // Vektor löschen. Best-effort + feature-detektiert (fehlt embedFn/setEmbedding,
     // z. B. in schlanken Test-Mocks, passiert nichts).
+    //
+    // Request-Token je msgId: schneller Rating-Wechsel (👍 → zurück, während der
+    // Embed noch läuft) darf keinen Orphan-Vektor hinterlassen. Jede Rate-Aktion
+    // (auch die synchrone Clear-Variante) bumpt den Token; ein verspäteter
+    // Callback mit veraltetem Token wird verworfen.
+    property var _embedTokens: ({})   // msgId -> monotone Nummer
+
     function _syncEmbedding(msgId, rating) {
         if (!ctl.store || typeof ctl.store.setEmbedding !== "function") return
+        var tok = (ctl._embedTokens[msgId] || 0) + 1      // jede Rate-Aktion invalidiert frühere Callbacks
+        ctl._embedTokens[msgId] = tok
         if (rating === 1) {
             if (!ctl.embedFn || typeof ctl.store.questionForAnswer !== "function") return
             var q = ctl.store.questionForAnswer(msgId)
             if (!q) return
             ctl.embedFn(q, function(r) {
+                if (ctl._embedTokens[msgId] !== tok) return   // Zustand hat sich geändert -> verwerfen
                 if (r && r.vec && r.vec.length > 0) ctl.store.setEmbedding(msgId, r.vec, r.model)
             })
         } else {
@@ -117,6 +127,11 @@ QtObject {
     function _buildCtx() {
         return {
             "fileio": ctl.fileio, "http": ctl.http, "settings": ctl.settings, "comfy": ctl.comfy,
+            // Ursprungs-Konversation für Tools, die eine spätere Zuordnung brauchen
+            // (generate_image reicht sie als originConvId an ComfyClient weiter, damit
+            // der onFinished-Guard tool-Bilder ebenfalls der richtigen Konversation
+            // zuordnet — Fix 2 nach Re-Review).
+            "conversationId": ctl.conversationId,
             "newProcess": function() {
                 var p = Qt.createQmlObject('import net.niuton.aurora.core; ProcessRunner {}', ctl)
                 p.maxOutputBytes = 100000     // Parität zur alten main.qml-Fabrik (5b-Handoff)
@@ -387,7 +402,17 @@ QtObject {
     property int _queuePos: 0
 
     function _onStreamDone(result) {
-        if (result.toolCalls && result.toolCalls.length > 0) {
+        // Harte Obergrenze (Audit ChatController.qml:390): toolMaxRounds steuerte
+        // bisher nur, ob Tools ANGEBOTEN werden (req.tools in _stream) — nicht, ob
+        // die Schleife weiterläuft. Hält sich das Backend nicht daran und liefert
+        // tool_calls auch auf die tools-lose Folge-Anfrage (_afterRound-Else-Zweig),
+        // würde _round ohne diese Prüfung unbegrenzt weiterklettern (erneute
+        // Ausführung, wiederholte „Rundenlimit"-Notiz, State klemmt in toolRunning).
+        // Ab _round >= maxR werden etwaige tool_calls ignoriert — weder ausgeführt
+        // noch neu angeboten — und der Zug endet deterministisch über den normalen
+        // Abschluss-Pfad unten (_finalizeAssistant("final")).
+        var maxR = (ctl.settings && ctl.settings.toolMaxRounds) ? ctl.settings.toolMaxRounds : 5
+        if (result.toolCalls && result.toolCalls.length > 0 && _round < maxR) {
             // Assistant-Zwischenantwort (mit Calls) in Kontext + DB
             _content = _cleanResponse(_content)
             var aid = _persist({ "role": "assistant", "content": _content, "thinking": _thinking,
@@ -605,15 +630,49 @@ QtObject {
         // zurücknehmen. Nach einem Tool-Zug ist _messages = [user, asst(tool_calls),
         // tool, asst(final)] — eine feste "letzte zwei"-Annahme wäre falsch.
         var lastUser = null
+        // _messages trägt selbst kein imagePath/displayText (die leben nur kurz im
+        // extra-Objekt von send() und landen als mediaPath/text in der ListModel-
+        // Zeile) — deshalb VOR dem Entfernen der User-Zeile deren Primitive sichern
+        // (kein Objekt-Handle behalten: chatModel.get() ist nach remove() nicht
+        // mehr garantiert gültig).
+        var lastUserMediaPath = ""
+        var lastUserDisplayText = ""
         while (_messages.length > 0) {
             var m = _messages.pop()
             if (m._msgId) store.deleteMessage(m._msgId)     // DB-Row (auch tool-Zeilen)
-            if (m.role !== "tool" && chatModel.count > 0)   // tool-Zeilen haben keine Bubble
+            if (m.role !== "tool" && chatModel.count > 0) {  // tool-Zeilen haben keine Bubble
+                if (m.role === "user") {
+                    var row = chatModel.get(chatModel.count - 1)
+                    lastUserMediaPath = row.mediaPath || ""
+                    lastUserDisplayText = row.text || ""
+                }
                 chatModel.remove(chatModel.count - 1)
+            }
             if (m.role === "user") { lastUser = m; break }
         }
         if (!lastUser) return
-        send(lastUser.content, null)
+        // Bild-Kontext (images/imagePath) des Zuges wiederherstellen, sonst wird aus
+        // einer Vision-Antwort beim Regenerieren eine unpassende Text-Antwort
+        // (Task 10, Fix B). Ohne Bild bleibt extra null (unverändertes Verhalten).
+        var extra = null
+        if (lastUser.images) {
+            // In-Session: die base64-Bytes liegen noch im _messages-Eintrag.
+            extra = { displayText: lastUserDisplayText || lastUser.content, images: lastUser.images }
+            if (lastUserMediaPath) extra.imagePath = lastUserMediaPath
+        } else if (lastUserMediaPath) {
+            // Nach Reload trägt _messages KEINE images (base64 wird nie persistiert,
+            // CLAUDE.md), aber der Bildpfad ist aus der DB wiederhergestellt. Die Bytes
+            // von der Platte nachladen, damit der Regenerate-Request das Bild wirklich
+            // trägt. Sonst zeigte die neue User-Bubble ein Thumbnail (imagePath),
+            // während der chatFn-Request bildlos wäre — irreführend und schlechter als
+            // vor dem Fix. Ist die Datei weg oder FileIO nicht verfügbar, ehrlich als
+            // Text-only OHNE Thumbnail regenerieren (extra bleibt null, kein imagePath).
+            var b64 = ctl.fileio ? ctl.fileio.readBase64(lastUserMediaPath) : { "ok": false }
+            if (b64 && b64.ok)
+                extra = { displayText: lastUserDisplayText || lastUser.content,
+                          images: [b64.data], imagePath: lastUserMediaPath }
+        }
+        send(lastUser.content, extra)
     }
 
     function loadConversation(convId) {
@@ -675,7 +734,18 @@ QtObject {
                            : { "ok": false, "error": (r && r.error) ? r.error : "Schreibfehler" }
     }
 
-    function appendGeneratedImage(path, prompt) {
+    // Rendert ein generiertes Bild als sichtbare Chat-Zeile UND persistiert es —
+    // für beide Wege (manueller ImagePanel-Weg und generate_image-Tool). Der
+    // toolInitiated-Flag (vom AuroraController-Handler durchgereicht) steuert nur,
+    // ob zusätzlich ein assistant-Eintrag in die API-History (_messages) geschoben
+    // wird: Beim Tool-Weg wird das UNTERDRÜCKT, weil das Bild MITTEN in einer
+    // laufenden Tool-Runde eintrifft — ein assistant-Eintrag zwischen
+    // assistant(tool_calls) und dem tool-Ergebnis würde die Reihenfolge zerreißen.
+    // Das Tool trägt sein Ergebnis separat über _pushToolMessage in _messages; das
+    // Bild bleibt sichtbar (Chat-Zeile) und persistiert (DB-Zeile, erscheint beim
+    // Reload). Beim manuellen Weg (kein Tool-Loop) gehört das Bild sehr wohl in die
+    // History. Default (Flag undefined, z. B. 2-Argument-Aufrufe) = manuell.
+    function appendGeneratedImage(path, prompt, toolInitiated) {
         _appendRow({ isUser: false, ts: _nowTs(), mediaPath: path, mediaType: "image",
                      text: "", status: "final" })
         var idx = chatModel.count - 1
@@ -683,6 +753,7 @@ QtObject {
                              "mediaPath": path, "mediaType": "image/png", "status": "final",
                              "model": ctl.activeModel, "backend": ctl.isRemote ? "remote" : "local" })
         chatModel.setProperty(idx, "msgId", aid)
-        _messages.push({ "role": "assistant", "content": "[Bild generiert: " + prompt + "]", "_msgId": aid })
+        if (toolInitiated !== true)
+            _messages.push({ "role": "assistant", "content": "[Bild generiert: " + prompt + "]", "_msgId": aid })
     }
 }

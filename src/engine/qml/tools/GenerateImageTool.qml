@@ -53,7 +53,15 @@ Tool {
             "prompt": args.prompt || "",
             "model": (ctx.settings && ctx.settings.comfyDefaultModel) || "z_image_turbo",
             "width": parseInt(args.width) || 1024,
-            "height": parseInt(args.height) || 1024
+            "height": parseInt(args.height) || 1024,
+            // Markiert den Lauf als tool-initiiert (Task 4) — steuert im
+            // AuroraController-Handler die API-History-Unterdrückung; die Bubble
+            // erscheint dennoch sichtbar (s. appendGeneratedImage).
+            "toolInitiated": true,
+            // Ursprungs-Konversation (aus dem ChatController-Kontext) — der
+            // onFinished-Guard verwirft das Bild, falls der Nutzer zwischenzeitlich
+            // die Konversation gewechselt hat (Fix 2 nach Re-Review, beide Wege).
+            "originConvId": (ctx && ctx.conversationId) || ""
         })
     }
 

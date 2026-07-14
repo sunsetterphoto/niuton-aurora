@@ -44,6 +44,7 @@ QtObject {
 
     property int _remoteWinnerIndex: -1
     property int _probeEpoch: 0            // verwirft späte Antworten alter Proben
+    property int _probePending: 0          // noch offene Antworten der aktuellen Epoche (Task 3)
 
     property Timer _profileTimer: Timer {
         interval: 30000
@@ -80,7 +81,16 @@ QtObject {
         probeBackends()
     }
 
-    function activeClient() { return isRemote ? remoteClient : localClient }
+    // Audit-Fix Task 3 (Fast-Follow): probeBackends() leert remoteClient.baseUrl
+    // SOFORT beim Epochen-Start, isRemote bleibt bis zur Probe-Antwort unverändert
+    // — im Bounded-Fenster isRemote===true bei leerer baseUrl fällt hier zentral
+    // auf den (immer gültigen) lokalen Client zurück, statt "" + "/api/..." zu
+    // bauen. chat()/embed()/preload() (und apiBase()) laufen alle über diese eine
+    // Stelle. Verhalten außerhalb des Fensters (gültige remoteClient.baseUrl)
+    // unverändert.
+    function activeClient() {
+        return (isRemote && remoteClient.baseUrl !== "") ? remoteClient : localClient
+    }
     function apiBase() { return activeClient().baseUrl }
     function chat(request) { return activeClient().chat(request) }
     function embed(model, input, callback) { activeClient().embed(model, input, callback) }
@@ -140,10 +150,19 @@ QtObject {
         for (var i = 0; i < raw.length; i++)
             if (raw[i] && eps.indexOf(raw[i]) === -1) eps.push(raw[i])
 
+        // Jede Epoche beginnt „unbewiesen offline": Reset VOR dem Probing
+        // (Audit-Fix Task 3 — Alt-Bug: ein voll fehlschlagender Re-Probe ließ
+        // die Werte der letzten ERFOLGREICHEN Epoche stehen — grüner Punkt,
+        // tote IP, tote Modelle im Picker, obwohl eps.length > 0 war). Nur ein
+        // tatsächlicher Erfolg in _probeEndpoint setzt remoteAvailable/baseUrl
+        // innerhalb dieser Epoche wieder — der Erfolgspfad selbst bleibt
+        // unverändert.
         _remoteWinnerIndex = -1
+        remoteAvailable = false
+        remoteClient.baseUrl = ""           // Wechsel leert auch remoteClient.models
+        _probePending = eps.length
         if (eps.length === 0) {
-            remoteAvailable = false
-            remoteClient.baseUrl = ""
+            _fallbackFromDeadRemote()
             return
         }
         for (var j = 0; j < eps.length; j++) {
@@ -157,18 +176,47 @@ QtObject {
     function _probeEndpoint(idx, url, epoch) {
         http.getJson(url + "/api/tags", function(res) {
             if (epoch !== mgr._probeEpoch) return
-            var count = (res.ok && res.data && res.data.models)
-                ? res.data.models.length : 0
-            if (count === 0) return
-            if (mgr._remoteWinnerIndex !== -1 && idx >= mgr._remoteWinnerIndex) return
-            mgr._remoteWinnerIndex = idx
-            mgr.remoteClient.baseUrl = url          // Wechsel leert dessen Cache
-            mgr.remoteAvailable = true
-            mgr.remoteClient.refreshModels(function() {
-                if (epoch !== mgr._probeEpoch) return
-                mgr._applyPendingRemoteModel()
-            })
+            try {
+                var count = (res.ok && res.data && res.data.models)
+                    ? res.data.models.length : 0
+                if (count === 0) return
+                if (mgr._remoteWinnerIndex !== -1 && idx >= mgr._remoteWinnerIndex) return
+                mgr._remoteWinnerIndex = idx
+                mgr.remoteClient.baseUrl = url          // Wechsel leert dessen Cache
+                mgr.remoteAvailable = true
+                mgr.remoteClient.refreshModels(function() {
+                    if (epoch !== mgr._probeEpoch) return
+                    mgr._applyPendingRemoteModel()
+                })
+            } finally {
+                // Zählt IMMER (Erfolg wie Fehlschlag) — Task 3: sobald alle
+                // Endpunkte dieser Epoche geantwortet haben und keiner
+                // gewonnen hat, war die Probe ein Vollausfall.
+                mgr._probeSettled(epoch)
+            }
         })
+    }
+
+    // Alle Endpunkte der aktuellen Epoche beantwortet und keiner gewonnen
+    // (remoteAvailable weiterhin false) → Vollausfall: ggf. von einem toten
+    // Remote-Modell zurückfallen.
+    function _probeSettled(epoch) {
+        if (epoch !== _probeEpoch) return
+        _probePending--
+        if (_probePending <= 0 && !remoteAvailable) _fallbackFromDeadRemote()
+    }
+
+    // Kein Remote verfügbar (Probe fehlgeschlagen oder keine Endpoints
+    // konfiguriert), aber ein Remote-Modell war aktiv: auf Auto/lokal
+    // zurückfallen, damit chat()/embed() nie an eine leere baseUrl gehen
+    // (Audit Task 3). isRemote NICHT hier selbst zurücksetzen —
+    // resolveAndLoadModel() erledigt das erst NACH dem Capturing von
+    // prevWasLocal (sonst Alt-Bug: keep_alive-0 für das Remote-Modell würde
+    // fälschlich an den lokalen Server gehen, siehe dessen Kommentar).
+    function _fallbackFromDeadRemote() {
+        if (!isRemote) return
+        selectedModel = "auto"
+        resolveAndLoadModel()
     }
 
     // Gespeicherte Remote-Auswahl anwenden, sobald der Server erreichbar ist

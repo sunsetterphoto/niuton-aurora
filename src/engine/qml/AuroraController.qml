@@ -13,12 +13,18 @@ QtObject {
     // ==================== Host-gesteuerter Lebenszyklus ====================
     // Der Host bindet `active` an seine Sichtbarkeit (Widget: expanded || isPinned).
     property bool active: false
-    // active gated nur Polling (ModelManager.active) + Unload beim Deaktivieren.
+    // active gated nur Polling (ModelManager.active) + Unload/Aufnahme-Stopp beim Deaktivieren.
     // activate() (Refresh-Kaskade) ruft der Host bei JEDEM expanded->true selbst —
     // so läuft der Refresh auch beim gepinnten Fokus-Bounce (Parität zum alten
     // onExpandedChanged), ohne dass active bei gepinntem Widget je auf false fällt.
     onActiveChanged: {
-        if (!active) modelManager.scheduleUnload()
+        if (!active) {
+            modelManager.scheduleUnload()
+            // Popup geschlossen: laufende Aufnahme/Wiedergabe beenden, sonst
+            // nimmt pw-record nach dem Schließen unbegrenzt weiter auf.
+            voiceRecorder.stop()
+            speaker.stop()
+        }
     }
 
     // ==================== Read-State: Chat ====================
@@ -135,17 +141,39 @@ QtObject {
     // default property) über eine Property angehängt.
     property Timer _cmdNoticeTimer: Timer { id: _noticeTimer; interval: 5000; onTriggered: controller.commandNotice = "" }
 
-    property Speaker _sp: Speaker { id: speaker; voice: settings.ttsVoice }
+    property Speaker _sp: Speaker {
+        id: speaker
+        voice: settings.ttsVoice
+        onErrorOccurred: function(message) {
+            controller._transientStatus = "Sprachausgabe: " + message
+            voiceStatusTimer.restart()
+        }
+    }
 
     property ComfyClient _comfy: ComfyClient {
         id: comfyClient
         endpoint: settings.comfyEnabled ? (settings.comfyEndpoint || "") : ""
-        // generate_image (Tool-Weg) läuft über die Registry; dieser Handler
-        // bedient nur den manuellen Bild-Modus (ImagePanel).
+        // Dieser Handler rendert BEIDE Wege ins Chat-Modell (Tool-Weg wie manueller
+        // ImagePanel-Weg — appendGeneratedImage ist die EINZIGE Funktion, die eine
+        // bild-tragende Chat-Zeile erzeugt). Task 4, zwei Aspekte:
+        // 1) Einheitlicher conversationId-Guard über BEIDE Wege: nur anhängen, wenn
+        //    die Konversation seit dem Start der Generierung (comfyClient.originConvId,
+        //    von beiden Aufrufern gesetzt) unverändert ist — sonst verwerfen, statt
+        //    das Bild bei Wechsel/„Neuer Chat" in die falsche Konversation zu schreiben.
+        // 2) Der toolInitiated-Flag wird an appendGeneratedImage durchgereicht:
+        //    tool-initiierte Bilder erscheinen sichtbar + werden persistiert, aber
+        //    NICHT als assistant-Zeile in die API-History (_messages) eingefügt —
+        //    sonst rutschte eine assistant-Zeile zwischen assistant(tool_calls) und
+        //    das tool-Ergebnis (History zerrissen). Das Tool trägt sein Ergebnis
+        //    separat über _pushToolMessage in _messages.
         onFinished: function(imagePath, promptText) {
-            engine.appendGeneratedImage(imagePath, promptText)
+            if (engine.conversationId !== comfyClient.originConvId) return
+            engine.appendGeneratedImage(imagePath, promptText, comfyClient.toolInitiated)
         }
         onFailed: function(message) {
+            // Ein fehlgeschlagener TOOL-Lauf meldet seinen Fehler selbst (über das
+            // Tool-Ergebnis im Chat) — hier keine zusätzliche transiente Statuszeile.
+            if (comfyClient.toolInitiated) return
             controller._transientStatus = "Bild: " + message
         }
     }
@@ -205,30 +233,51 @@ QtObject {
     }
 
     // ==================== Chat-Methoden ====================
+    // Nur als Slash-Befehl behandeln, wenn der erste Token ein Befehlsname sein
+    // KANN (reine Buchstaben). "/etc/fstab …", "/home/…", "/tmp x" sind Pfad/Prosa
+    // und müssen ans Modell, nicht verschluckt werden.
+    function _looksLikeCommand(text) {
+        if (!text || String(text).charAt(0) !== "/") return false
+        var body = String(text).substring(1)
+        var sp = body.indexOf(" ")
+        var name = sp === -1 ? body : body.substring(0, sp)
+        return /^[a-zA-Z]+$/.test(name)
+    }
+
     // Caps-Priming: direkt nach einem Modellwechsel sind die /api/show-Caps evtl.
     // noch nicht da — frisch holen (withActiveCaps), dann über die Fassade senden.
     function sendMessage(text) {
-        var _cmd = Commands.parse(text)
-        if (_cmd) { runCommand(_cmd.name, _cmd.arg); return }
+        if (_looksLikeCommand(text)) {
+            var _cmd = Commands.parse(text)
+            if (_cmd) {
+                // Ein Befehl konsumiert die aktuelle Eingabe, aber NICHT als
+                // Anhang-tragende Nachricht — sonst reitet ein evtl. gesetzter
+                // Anhang still auf der nächsten echten Nachricht mit (Task 10, Fix A).
+                attachedFileUrl = ""; attachedFileName = ""
+                runCommand(_cmd.name, _cmd.arg)
+                return
+            }
+        }
         if (attachedFileUrl !== "") {
             var pathStr = FileIO.urlToPath(attachedFileUrl.toString())
             var name = attachedFileName
             var isImage = /\.(png|jpe?g|webp|bmp)$/i.test(pathStr)
             attachedFileUrl = ""; attachedFileName = ""
             if (isImage) {
-                if (modelManager.activeCaps.indexOf("vision") === -1) {
-                    modelManager.withActiveCaps(function() {
+                // Vision-Fähigkeit auf FRISCH geholten Caps entscheiden (Callback-Argument),
+                // nicht auf evtl. veraltetem modelManager.activeCaps — direkt nach einem
+                // Modellwechsel sind die /api/show-Caps sonst noch die des alten Modells.
+                modelManager.withActiveCaps(function(caps) {
+                    if (caps.indexOf("vision") === -1) {
                         engine.send(text + "\n\n(Hinweis: Bild '" + name + "' angehängt, aber das aktive Modell unterstützt keine Bildeingabe.)",
                                     { displayText: text + "  📎 " + name })
-                    })
-                    return
-                }
-                var b64 = FileIO.readBase64(pathStr)
-                if (!b64.ok) {
-                    modelManager.withActiveCaps(function() { engine.send(text, null) })
-                    return
-                }
-                modelManager.withActiveCaps(function() {
+                        return
+                    }
+                    var b64 = FileIO.readBase64(pathStr)
+                    if (!b64.ok) {
+                        engine.send(text, null)
+                        return
+                    }
                     engine.send(text, { images: [b64.data], imagePath: pathStr, displayText: text })
                 })
             } else {
@@ -321,7 +370,8 @@ QtObject {
     function deleteConversation(convId) { engine.deleteConversation(convId); refreshConversationList() }
     function refreshConversationList() {
         conversationList = engine.listConversations().map(function(c) {
-            return { "id": c.id, "title": c.title !== "" ? c.title : "Neue Konversation", "created_at": c.createdAt }
+            return { "id": c.id, "title": c.title !== "" ? c.title : "Neue Konversation",
+                "created_at": c.createdAt, "updated_at": c.updatedAt }
         })
     }
 
@@ -382,6 +432,21 @@ QtObject {
     function setImageMode(on) { imageMode = on }
     function openAttachment() { fileDialog.open() }
     function clearAttachment() { attachedFileUrl = ""; attachedFileName = "" }
-    function generateImage(params) { comfyClient.generate(params) }
+    function generateImage(params) {
+        // Manuelle Busy-Ablehnung hier direkt melden (nicht über comfyClient.failed),
+        // sonst könnte der toolInitiated-Guard in onFailed die Rückmeldung schlucken,
+        // solange eine tool-initiierte Generierung läuft (Minor). In der UI ist der
+        // Generieren-Knopf während busy zwar ohnehin deaktiviert (ImagePanel) —
+        // dieser Zweig ist die belt-and-suspenders-Absicherung.
+        if (comfyClient.busy) {
+            _transientStatus = "Bild: Es läuft bereits eine Generierung"
+            voiceStatusTimer.restart()
+            return
+        }
+        // Ursprungs-Konversation an die Generierung heften (einheitlicher Guard mit
+        // dem Tool-Weg) — der onFinished-Handler verwirft das Bild bei Wechsel.
+        params.originConvId = engine.conversationId
+        comfyClient.generate(params)
+    }
     function openMemory() { Qt.openUrlExternally("file://" + FileIO.standardPath("appData") + "/memory.md") }
 }

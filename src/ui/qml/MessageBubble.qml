@@ -76,6 +76,35 @@ Item {
 
     HoverHandler { id: bubbleHover }
 
+    // Sicherheit: JEDE Markdown-Bild-Syntax entschärfen, BEVOR der Text in ein
+    // Text.MarkdownText-Label läuft. Qt's Rich-Text-Renderer lädt Bild-Quellen
+    // aktiv nach (Remote-Fetch) -> ein Modell könnte damit die IP des Nutzers
+    // an eine beliebige URL leaken (Read-Tracking).
+    //
+    // Das einzige Zeichen, das ein Markdown-Bild von einem Link unterscheidet,
+    // ist das führende "!". Statt zu versuchen, CommonMark per Regex
+    // nachzubilden (die Inline-Form ![a](u) ist nur eine von vielen: Referenz
+    // ![a][1], Kurzform ![id], verschachtelter Alt-Text ![a[b]c](u)) wird
+    // schlicht jedes "![" zu "[" -> es entsteht KEIN Bild-Knoten mehr, nur ein
+    // Link. Links laden nichts automatisch nach; die URL bleibt lediglich als
+    // (beim Klick schema-gefiltertes) Link-Ziel erhalten.
+    function _neutralizeImages(t) {
+        return String(t || "").replace(/!\[/g, "[")
+    }
+
+    // Sicherheit: onLinkActivated bekommt vom Markdown-Renderer JEDES Schema
+    // durchgereicht (file://, custom://, ...). Nur harmlose, für externes
+    // Öffnen sinnvolle Schemata an den OS-Handler weiterreichen.
+    function _isSafeLink(link) {
+        var l = link.toLowerCase()
+        return l.indexOf("http://") === 0 || l.indexOf("https://") === 0 || l.indexOf("mailto:") === 0
+    }
+
+    function _safeOpen(link) {
+        if (bubble._isSafeLink(link))
+            Qt.openUrlExternally(link)
+    }
+
     // Zerlegt Markdown in Text- und ```Code```-Segmente
     function _segments(t) {
         var parts = []
@@ -220,9 +249,11 @@ Item {
                 }
 
                 // Aurora-Antwort als Text-/Code-Segmente
+                // Model hängt NUR von bubble.text ab -> der 450ms-Blink (_blinkOn)
+                // ändert die Array-Identität nicht mehr, Repeater behält seine
+                // Delegates (Text/Code-Rectangles, Copy-Buttons) über den Blink hinweg.
                 Repeater {
-                    model: bubble.isUser ? [] : bubble._segments(
-                        bubble.text + (bubble.streaming && bubble._blinkOn ? " ▍" : ""))
+                    model: bubble.isUser ? [] : bubble._segments(bubble.text)
 
                     delegate: Column {
                         id: segment
@@ -234,11 +265,11 @@ Item {
                         QQC2.Label {
                             visible: !segment.modelData.isCode
                             width: parent.width
-                            text: visible ? segment.modelData.content : ""
+                            text: visible ? bubble._neutralizeImages(segment.modelData.content) : ""
                             wrapMode: Text.Wrap
                             color: Kirigami.Theme.textColor
                             textFormat: Text.MarkdownText
-                            onLinkActivated: function(link) { Qt.openUrlExternally(link) }
+                            onLinkActivated: function(link) { bubble._safeOpen(link) }
                         }
 
                         // Code-Segment mit Kopieren-Button
@@ -293,6 +324,18 @@ Item {
                             }
                         }
                     }
+                }
+
+                // Blinkender Streaming-Cursor als eigenständiges, nachgestelltes
+                // Element (NICHT Teil des Segment-Models): der Blink toggelt nur
+                // opacity, nie visible -> keine Layout-Neuberechnung von contentCol
+                // pro Blink, das Segment-Repeater-Model bleibt unberührt.
+                QQC2.Label {
+                    id: streamCursor
+                    visible: !bubble.isUser && bubble.streaming
+                    opacity: bubble._blinkOn ? 1 : 0
+                    text: "▍"
+                    color: Kirigami.Theme.textColor
                 }
             }
         }

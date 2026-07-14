@@ -36,7 +36,33 @@ done
 echo "[4/4] Sprache: Piper TTS + Whisper STT..."
 mkdir -p "$AURORA_DATA/piper" "$AURORA_DATA/whisper" "$AURORA_DATA/images"
 
-if ! command -v piper >/dev/null 2>&1; then
+# Download-Helfer: laedt nach Temp-Datei im Zielverzeichnis, prueft HTTP-Status
+# (-f) und optional eine Mindestgroesse, bevor die Datei an ihren Zielort
+# verschoben wird. Bei jedem Fehler wird die Teildatei entfernt, damit der
+# "[ ! -f ziel ]"-Guard beim naechsten Lauf erneut laedt statt eine
+# Fehlerseite/Ruine als "vorhanden" durchgehen zu lassen. Fehlschlaege sind
+# hier bewusst NICHT fatal (kein "set -e"-Abbruch): ein einzelner
+# Netzwerk-Hänger soll nicht die restlichen Assets in diesem Skript verhindern
+# - der Aufrufer bekommt eine Warnung und der Guard sorgt fuer Retry beim
+# naechsten setup-assets.sh-Lauf.
+fetch() {
+    local url="$1" ziel="$2" min_size="${3:-1}" tmp size
+    tmp="$(mktemp "${ziel}.tmp.XXXXXX")"
+    if ! curl -fL --retry 3 --retry-delay 2 -o "$tmp" "$url"; then
+        echo "  WARNUNG: Download fehlgeschlagen: $url" >&2
+        rm -f "$tmp"
+        return 1
+    fi
+    size="$(wc -c <"$tmp" | tr -d ' ')"
+    if [ "$size" -lt "$min_size" ]; then
+        echo "  WARNUNG: Datei verdaechtig klein (${size} Bytes), verworfen: $url" >&2
+        rm -f "$tmp"
+        return 1
+    fi
+    mv "$tmp" "$ziel"
+}
+
+if [ ! -x "$HOME/.local/bin/piper" ]; then
     echo "  Installiere piper-tts (pip)..."
     pip install --user piper-tts
 fi
@@ -48,17 +74,31 @@ fi
 PIPER_BASE="https://huggingface.co/rhasspy/piper-voices/resolve/main/de/de_DE"
 for voice in "thorsten/high/de_DE-thorsten-high" "kerstin/low/de_DE-kerstin-low"; do
     name="$(basename "$voice")"
-    if [ ! -f "$AURORA_DATA/piper/$name.onnx" ]; then
-        echo "  Lade Piper-Stimme $name..."
-        curl -sL -o "$AURORA_DATA/piper/$name.onnx" "$PIPER_BASE/$voice.onnx"
-        curl -sL -o "$AURORA_DATA/piper/$name.onnx.json" "$PIPER_BASE/$voice.onnx.json"
+    onnx="$AURORA_DATA/piper/$name.onnx"
+    json="$AURORA_DATA/piper/$name.onnx.json"
+    # Onnx-Modell und JSON-Konfig einzeln guarden (nicht verschachtelt): sonst
+    # wuerde ein fehlgeschlagener json-Download beim naechsten Lauf uebersehen,
+    # weil der aeussere Guard nur auf das (dann schon vorhandene) onnx prueft.
+    if [ ! -f "$onnx" ]; then
+        echo "  Lade Piper-Stimme $name (Modell)..."
+        if ! fetch "$PIPER_BASE/$voice.onnx" "$onnx" 1000000; then
+            echo "  Ueberspringe $name (Modell-Download fehlgeschlagen; naechster Lauf versucht es erneut)."
+        fi
+    fi
+    if [ ! -f "$json" ]; then
+        echo "  Lade Piper-Stimme $name (Konfig)..."
+        if ! fetch "$PIPER_BASE/$voice.onnx.json" "$json" 16; then
+            echo "  WARNUNG: $name.onnx.json fehlt weiterhin (naechster Lauf versucht es erneut)."
+        fi
     fi
 done
 
 if [ ! -f "$AURORA_DATA/whisper/ggml-small.bin" ]; then
     echo "  Lade Whisper-Modell (ggml-small, ~466 MB)..."
-    curl -sL -o "$AURORA_DATA/whisper/ggml-small.bin" \
-        "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.bin"
+    if ! fetch "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.bin" \
+        "$AURORA_DATA/whisper/ggml-small.bin" 100000000; then
+        echo "  WARNUNG: Whisper-Modell fehlt weiterhin - STT laeuft nicht, bis setup-assets.sh erneut erfolgreich laeuft."
+    fi
 fi
 
 echo "=== Assets fertig ==="

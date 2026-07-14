@@ -77,6 +77,18 @@ Item {
             verify(ctx.http.lastUrl.indexOf("http://127.0.0.1:8888") === 0)
         }
 
+        function test_searchMissingFieldsNoUndefined() {
+            // Verifizierter Audit-Fund WebSearchTool.qml:25 — fehlende title/href dürfen
+            // niemals als literales "undefined" im Modell-Kontext landen.
+            var ctx = makeCtx({ httpResult: { ok: true, data: { results: [
+                { body: "B2" },
+                { url: "http://fallback/3" } ] } } })
+            var out = null
+            searchTool.execute({ query: "x" }, ctx, function(t) { out = t })
+            verify(out.indexOf("undefined") === -1)
+            verify(out.indexOf("http://fallback/3") >= 0)   // Titel fällt auf url zurück
+        }
+
         function test_searchUnavailable() {
             var ctx = makeCtx({ httpResult: { ok: false, error: "conn refused" } })
             var out = null

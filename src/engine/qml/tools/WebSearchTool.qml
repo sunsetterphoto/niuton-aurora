@@ -22,9 +22,13 @@ Tool {
         if (!results || results.length === 0) return "(Keine Suchergebnisse gefunden)"
         var text = ""
         for (var i = 0; i < results.length; i++) {
-            text += (i + 1) + ". " + results[i].title + "\n"
-            if (results[i].body) text += "   " + results[i].body.substring(0, 200) + "\n"
-            text += "   URL: " + results[i].href + "\n\n"
+            var r = results[i] || {}
+            var title = r.title || r.url || ""
+            var body = r.body || r.snippet || ""
+            text += (i + 1) + ". " + title + "\n"
+            if (body) text += "   " + body.substring(0, 200) + "\n"
+            if (r.href) text += "   URL: " + r.href + "\n\n"
+            else text += "\n"
         }
         return text
     }

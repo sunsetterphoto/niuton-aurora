@@ -60,6 +60,20 @@ Item {
             compare(controller._stripMarkdown("- Punkt"), "Punkt")
         }
 
+        // Slash-Heuristik: nur reine Buchstaben-Tokens gelten als Befehlsname —
+        // Pfade/Prosa mit führendem "/" (z. B. "/etc/fstab …") sind kein Befehl.
+        function test_looksLikeCommand() {
+            verify(controller._looksLikeCommand("/help"))
+            verify(controller._looksLikeCommand("/knowledge"))
+            verify(controller._looksLikeCommand("/gibtsnicht"))   // reiner Buchstaben-Vertipper -> bleibt Befehl (Notiz)
+            verify(controller._looksLikeCommand("/model qwen"))   // Name = "model"
+            verify(!controller._looksLikeCommand("/etc/fstab hat einen Fehler"))
+            verify(!controller._looksLikeCommand("/home/x"))
+            verify(!controller._looksLikeCommand("/tmp/a b"))
+            verify(!controller._looksLikeCommand("hallo"))
+            verify(!controller._looksLikeCommand(""))
+        }
+
         // Slash-Befehls-Dispatch — nur netz-freie Befehle (kein /search <text>,
         // kein /model <treffer>, die würden engine.send/Netz auslösen).
         function test_commandList_vorhanden() {
@@ -86,6 +100,16 @@ Item {
             controller.commandNotice = ""
             controller.sendMessage("/help")
             verify(controller.commandNotice.indexOf("/model") >= 0)
+        }
+        // Ein Slash-Befehl konsumiert die Eingabe, NICHT einen evtl. gesetzten
+        // Anhang — sonst reitet die Datei still auf der nächsten echten Nachricht
+        // mit (Audit AuroraController.qml:213/Task 10, Fix A).
+        function test_command_leertAnhang() {
+            controller.attachedFileUrl = "file:///tmp/report.pdf"
+            controller.attachedFileName = "report.pdf"
+            controller.sendMessage("/new")
+            compare(controller.attachedFileUrl, "")
+            compare(controller.attachedFileName, "")
         }
         function test_command_export_inListe() {
             var hasExport = false
@@ -126,6 +150,80 @@ Item {
             verify(typeof controller.removeManualEntry === "function")
             verify(typeof controller.refreshManualEntries === "function")
         }
+        // Task 4: manuelle Generierung hängt an, solange die Konversation seit
+        // dem (simulierten) generateImage()-Start unverändert ist. originConvId wird
+        // direkt gesetzt statt über generateImage() -> kein echter comfy.generate()-
+        // Netzaufruf (die Instanz bleibt gemäß Dateikopf-Kommentar netz-frei).
+        function test_manualImage_appendsWhenConversationUnchanged() {
+            controller._comfy.originConvId = controller.conversationId
+            controller._comfy.toolInitiated = false
+            var before = controller.chatModel.count
+            controller._comfy.finished("/tmp/katze.png", "eine Katze")
+            compare(controller.chatModel.count, before + 1)
+        }
+
+        // Task 4: Konversationswechsel nach Start der Generierung -> Bild wird
+        // verworfen, nicht in die neue (falsche) Konversation gehängt.
+        function test_manualImage_discardedWhenConversationChanged() {
+            controller._comfy.originConvId = controller.conversationId  // "Start" der Generierung
+            controller.newConversation()                                // simuliert "/new" während die Generierung läuft
+            controller._comfy.toolInitiated = false
+            var before = controller.chatModel.count
+            controller._comfy.finished("/tmp/hund.png", "ein Hund")
+            compare(controller.chatModel.count, before)            // verworfen
+        }
+
+        // Task 4 (Fix nach Review): tool-initiierte Generierungen MÜSSEN sichtbar
+        // im Chat erscheinen (kein Render-Regress) — appendGeneratedImage ist die
+        // einzige Funktion, die eine bild-tragende Chat-Zeile erzeugt.
+        function test_toolImage_surfacesVisually() {
+            controller._comfy.originConvId = controller.conversationId  // Ursprung = aktuelle Konversation
+            controller._comfy.toolInitiated = true
+            var before = controller.chatModel.count
+            controller._comfy.finished("/tmp/tool.png", "vom Tool generiert")
+            compare(controller.chatModel.count, before + 1)   // Bild sichtbar angehängt
+            var row = controller.chatModel.get(controller.chatModel.count - 1)
+            compare(row.mediaPath, "/tmp/tool.png")
+            compare(row.mediaType, "image")
+            controller._comfy.toolInitiated = false
+        }
+
+        // Task 4 (Fix 2 nach Re-Review): der conversationId-Guard gilt jetzt auch für
+        // den TOOL-Weg — ein tool-Bild, dessen Ursprungskonversation sich vor dem
+        // finished geändert hat, wird VERWORFEN (nicht in die aktuelle geschrieben).
+        function test_toolImage_discardedWhenConversationChanged() {
+            controller._comfy.originConvId = controller.conversationId  // Ursprung der tool-Generierung
+            controller._comfy.toolInitiated = true
+            controller.newConversation()                                // Nutzer wechselt Konversation, während ComfyUI noch rechnet
+            var before = controller.chatModel.count
+            controller._comfy.finished("/tmp/tool2.png", "vom Tool generiert")
+            compare(controller.chatModel.count, before)            // verworfen, nicht falsch zugeordnet
+            controller._comfy.toolInitiated = false
+        }
+
+        // Task 4 (Minor): manueller generateImage()-Aufruf während einer laufenden
+        // Generierung meldet die Ablehnung direkt (nicht über den gegateten onFailed)
+        // und ruft comfyClient.generate() NICHT auf.
+        function test_generateImage_busyRejectsWithFeedback() {
+            controller._comfy.busy = true
+            controller._transientStatus = ""
+            var beforeOrigin = controller._comfy.originConvId
+            controller.generateImage({ prompt: "x" })
+            verify(controller._transientStatus.indexOf("läuft bereits") >= 0)
+            compare(controller._comfy.originConvId, beforeOrigin)   // generate() nicht aufgerufen -> originConvId unverändert
+            controller._comfy.busy = false
+        }
+
+        // Task 4 (Sprache/Robustheit): Speaker.errorOccurred (piper/aplay-Fehler)
+        // wird wie voiceRecorder.onErrorOccurred an den transienten Status
+        // gebunden — direkter Signal-Aufruf statt echtem Prozess-Spawn (piper/
+        // aplay dürfen in Tests nicht real gestartet werden).
+        function test_speakerError_setztTransientStatus() {
+            controller._transientStatus = ""
+            controller._sp.errorOccurred("Sprachausgabe fehlgeschlagen: Testfehler")
+            compare(controller._transientStatus, "Sprachausgabe: Sprachausgabe fehlgeschlagen: Testfehler")
+        }
+
         function test_openKnowledge_frischtBeideListen() {
             controller.knowledgeOpen = false
             controller.openKnowledge()

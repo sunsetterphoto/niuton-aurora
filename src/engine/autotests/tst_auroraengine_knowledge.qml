@@ -8,6 +8,8 @@ Item {
     property var embedResult: null
     property string embedInput: ""
     property int embedCalls: 0
+    property bool delayEmbed: false   // true -> Callback wird NICHT sofort gefeuert, sondern gespeichert
+    property var _pendingCb: null
 
     // Voller Store-Mock (Basis wie tst_auroraengine) + knowledge-Methoden.
     QtObject {
@@ -50,7 +52,11 @@ Item {
         id: engine
         store: storeMock
         settings: settingsMock
-        embedFn: function(input, cb) { root.embedInput = input; root.embedCalls++; cb(root.embedResult) }
+        embedFn: function(input, cb) {
+            root.embedInput = input; root.embedCalls++
+            if (root.delayEmbed) { root._pendingCb = cb; return }
+            cb(root.embedResult)
+        }
     }
 
     TestCase {
@@ -61,6 +67,7 @@ Item {
             storeMock.lastEmb = null; storeMock.embCount = 0; storeMock.clearCount = 0
             storeMock.entries = []
             root.embedResult = null; root.embedInput = ""; root.embedCalls = 0
+            root.delayEmbed = false; root._pendingCb = null
         }
 
         function test_add_erzeugtIdSchreibtUndBettetEin() {
@@ -111,6 +118,25 @@ Item {
             engine.addKnowledge("link", "A", "http://a", "b")
             compare(engine.knowledgeEntries().length, 1)
             compare(engine.knowledgeEntries()[0].title, "A")
+        }
+
+        // Race: add() (Embed in flight) gefolgt von schnellem Editieren zu leerem
+        // Inhalt (synchrones Clear) — der verspätete Embed-Callback darf danach
+        // KEINEN Orphan-Vektor mehr schreiben. Request-Token je id (_embedKnowledge).
+        function test_schnellerEditZuLeer_verwirftVeraltetenEmbedCallback() {
+            root.embedResult = { "vec": [0.1, 0.2], "model": "nomic-embed-text" }
+            root.delayEmbed = true
+            var id = engine.addKnowledge("note", "T", "", "C")   // Embed in flight, Callback gespeichert
+            compare(root.embedCalls, 1)
+            compare(storeMock.embCount, 0)
+            root.delayEmbed = false
+            engine.updateKnowledge(id, "note", "", "", "")       // zu leer editiert: synchrones Clear
+            compare(storeMock.clearCount, 1)
+            var pending = root._pendingCb
+            verify(pending !== null)
+            pending({ "vec": [0.1, 0.2], "model": "nomic-embed-text" })   // verspäteter Callback feuert jetzt
+            compare(storeMock.embCount, 0)              // KEIN Orphan-Vektor
+            compare(storeMock.lastEmb.vec.length, 0)    // letzter Schreibvorgang bleibt das Clear
         }
     }
 }

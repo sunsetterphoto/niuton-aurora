@@ -86,10 +86,10 @@ void Http::finishJson(QNetworkReply *reply, const QJSValue &callback)
         }
 
         const QByteArray raw = reply->readAll();
-        QJsonParseError parseError;
-        const QJsonDocument doc = QJsonDocument::fromJson(raw, &parseError);
 
         if (status < 200 || status >= 300) {
+            QJsonParseError parseError;
+            const QJsonDocument doc = QJsonDocument::fromJson(raw, &parseError);
             result[QStringLiteral("ok")] = false;
             result[QStringLiteral("error")] = QStringLiteral("HTTP %1").arg(status);
             if (parseError.error == QJsonParseError::NoError)
@@ -97,6 +97,19 @@ void Http::finishJson(QNetworkReply *reply, const QJSValue &callback)
             invoke(callback, result);
             return;
         }
+
+        // 2xx mit leerem/whitespace-only Body (z.B. 204 No Content) ist ein
+        // gueltiger Erfolg — kein Parse-Versuch, sonst meldet fromJson()
+        // faelschlich "Ungueltiges JSON" fuer einen leeren Body.
+        if (raw.trimmed().isEmpty()) {
+            result[QStringLiteral("ok")] = true;
+            result[QStringLiteral("data")] = QVariantMap();
+            invoke(callback, result);
+            return;
+        }
+
+        QJsonParseError parseError;
+        const QJsonDocument doc = QJsonDocument::fromJson(raw, &parseError);
 
         if (parseError.error != QJsonParseError::NoError) {
             result[QStringLiteral("ok")] = false;

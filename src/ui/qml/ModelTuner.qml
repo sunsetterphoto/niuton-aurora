@@ -14,7 +14,12 @@ Rectangle {
     property string modelName: ""
     property var params: ({})     // vorbefüllte Werte, z. B. { num_ctx: 8192, stop: ["</s>"] }
 
-    signal saveRequested(var params)
+    // Snapshot des Modellnamens beim Öffnen (Aufklappen/Erstanzeige) — Speichern
+    // zielt IMMER auf dieses Modell, auch wenn modelName sich während des Editierens
+    // extern ändert (z. B. Auto-Modus-Profilwechsel).
+    property string _snapModel: ""
+
+    signal saveRequested(string modelName, var params)
     signal closeRequested()
 
     // Test-/Interaktions-Schnittstelle: Aktiv-Schalter + Wert je Parameter.
@@ -60,9 +65,13 @@ Rectangle {
         advancedToggle.checked = advancedToggle.checked
             || numPredictRow.active || seedRow.active || minPRow.active || stopRow.active
     }
+    // origValue merkt den ROHEN gespeicherten Wert (auch außerhalb [minValue,maxValue]).
+    // QQC2.Slider klemmt row.value beim Zuweisen auf die Range — _save() braucht
+    // origValue, um einen unberührten Out-of-Range-Wert nicht durch den geklemmten
+    // Anzeigewert zu überschreiben (siehe _sliderSaveValue).
     function _loadSlider(row, p, key) {
-        if (p[key] !== undefined) { row.active = true; row.value = p[key] }
-        else { row.active = false; row.value = row.refValue }
+        if (p[key] !== undefined) { row.active = true; row.origValue = p[key]; row.value = p[key] }
+        else { row.active = false; row.origValue = undefined; row.value = row.refValue }
     }
     function _loadField(row, p, key) {
         if (p[key] !== undefined) { row.active = true; row.text = String(p[key]) }
@@ -72,18 +81,37 @@ Rectangle {
         if (p.stop !== undefined && p.stop.length > 0) { row.active = true; row.text = p.stop.join(", ") }
         else { row.active = false; row.text = "" }
     }
-    onParamsChanged: _load()
-    onVisibleChanged: if (visible) _load()
-    Component.onCompleted: _load()
+    // Öffnen: modelName snapshotten + gegen die aktuell gebundenen params laden.
+    // Kein onParamsChanged-Handler mehr — solange der Tuner offen ist, werden
+    // externe params-Änderungen (z. B. Modellwechsel im Auto-Modus) IGNORIERT,
+    // damit laufende Edits nicht überschrieben werden. Ein frischer Snapshot
+    // entsteht erst beim nächsten Öffnen (visible false -> true).
+    function _openSnapshot() {
+        _snapModel = tuner.modelName
+        _load()
+    }
+    onVisibleChanged: if (visible) _openSnapshot()
+    Component.onCompleted: _openSnapshot()
 
     // ---- Speichern: nur aktive Parameter, korrekte Typen ----
+    // Out-of-range-Schutz: wenn der Slider seit dem Laden nicht bewegt wurde (aktueller
+    // Wert == geklemmter Originalwert), wird der ROHE Originalwert gespeichert statt des
+    // geklemmten Anzeigewerts — ein Öffnen+Speichern ohne Slider-Berührung darf einen
+    // außerhalb der Range gespeicherten Wert nicht verlustbehaftet überschreiben.
+    function _sliderSaveValue(row) {
+        if (row.origValue !== undefined) {
+            var clamped = Math.min(row.maxValue, Math.max(row.minValue, row.origValue))
+            if (row.value === clamped) return row.origValue
+        }
+        return row.value
+    }
     function _save() {
         var o = {}
-        if (temperatureRow.active)   o.temperature    = temperatureRow.value
-        if (topPRow.active)          o.top_p          = topPRow.value
-        if (topKRow.active)          o.top_k          = Math.round(topKRow.value)
-        if (repeatPenaltyRow.active) o.repeat_penalty = repeatPenaltyRow.value
-        if (minPRow.active)          o.min_p          = minPRow.value
+        if (temperatureRow.active)   o.temperature    = _sliderSaveValue(temperatureRow)
+        if (topPRow.active)          o.top_p          = _sliderSaveValue(topPRow)
+        if (topKRow.active)          o.top_k          = Math.round(_sliderSaveValue(topKRow))
+        if (repeatPenaltyRow.active) o.repeat_penalty = _sliderSaveValue(repeatPenaltyRow)
+        if (minPRow.active)          o.min_p          = _sliderSaveValue(minPRow)
         _saveInt(numCtxRow, o, "num_ctx")
         _saveInt(numPredictRow, o, "num_predict")
         _saveInt(seedRow, o, "seed")
@@ -92,7 +120,7 @@ Rectangle {
                                   .filter(function(x) { return x !== "" })
             if (arr.length) o.stop = arr
         }
-        tuner.saveRequested(o)
+        tuner.saveRequested(_snapModel, o)
     }
     function _saveInt(row, o, key) {
         if (!row.active) return
@@ -111,6 +139,9 @@ Rectangle {
         property real step: 0.01
         property real refValue: 0
         property int decimals: 2
+        // Roher, ungeklemmter Wert aus dem letzten _loadSlider() — undefined, wenn
+        // der Parameter beim Laden inaktiv war oder seither manuell deaktiviert wurde.
+        property var origValue: undefined
         property alias active: activeBox.checked
         property alias value: slider.value
         Layout.fillWidth: true
@@ -118,8 +149,10 @@ Rectangle {
         QQC2.CheckBox {
             id: activeBox
             // Beim manuellen Deaktivieren zurück auf den Referenzwert, damit ein
-            // erneutes Aktivieren wieder beim Standard startet.
-            onToggled: if (!checked) slider.value = row.refValue
+            // erneutes Aktivieren wieder beim Standard startet; origValue verfällt
+            // dabei, damit ein späteres Reaktivieren nicht versehentlich den alten
+            // (ggf. out-of-range) Ladewert wiederbelebt.
+            onToggled: if (!checked) { slider.value = row.refValue; row.origValue = undefined }
         }
         QQC2.Label {
             text: row.label
@@ -203,7 +236,7 @@ Rectangle {
         RowLayout {
             Layout.fillWidth: true
             QQC2.Label {
-                text: "Parameter · " + (tuner.modelName !== "" ? tuner.modelName : "(kein Modell)")
+                text: "Parameter · " + (tuner._snapModel !== "" ? tuner._snapModel : "(kein Modell)")
                 font.bold: true
                 elide: Text.ElideRight
                 Layout.fillWidth: true

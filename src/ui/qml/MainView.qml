@@ -117,8 +117,11 @@ ColumnLayout {
                 visible: root._tuneOpen
                 modelName: root.controller.activeModel
                 params: root.controller.modelParamsFor(root.controller.activeModel)
-                onSaveRequested: function(p) {
-                    root.controller.setModelParams(root.controller.activeModel, p)
+                onSaveRequested: function(modelName, p) {
+                    // modelName ist das beim Öffnen gesnapshottete Modell (nicht
+                    // zwingend das inzwischen aktive) — verhindert Falschspeichern
+                    // bei Auto-Modus-Modellwechsel während der Tuner offen ist.
+                    root.controller.setModelParams(modelName, p)
                     root._tuneOpen = false
                 }
                 onCloseRequested: root._tuneOpen = false

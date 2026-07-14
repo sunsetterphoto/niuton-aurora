@@ -271,6 +271,78 @@ TestCase {
         compare(e[2].label, "● gemma4:e4b (5 GB)")
     }
 
+    // Audit-Fix Task 3: Remote-Status muss bei einem voll fehlschlagenden
+    // Re-Probe zurückgesetzt werden (Alt-Bug: blieb "online" mit toter
+    // baseUrl, wenn eps.length > 0 war) — und ein aktives Remote-Modell
+    // muss auf Auto/lokal zurückfallen, statt an eine leere baseUrl zu senden.
+    function test_remoteOfflineNachErfolgReicherProbeFaelltZurueck() {
+        ConfigStore.setValue("remoteEndpoint", "http://lan:11434")
+        mgr.refresh()
+        var iProbe = mockHttp.find("http://lan:11434/api/tags")
+        mockHttp.answer(iProbe, _tags(["gross:31b"]))
+        var iRefresh = mockHttp.find("http://lan:11434/api/tags", iProbe + 1)
+        mockHttp.answer(iRefresh, _tags(["gross:31b"]))
+        mockHttp.answer(mockHttp.find("http://lan:11434/api/ps"), { "ok": true, "data": { "models": [] } })
+        mgr.selectModel("remote:gross:31b")
+        var iPre = mockHttp.find("http://lan:11434/api/chat")
+        mockHttp.answer(iPre, { "ok": true })     // Remote-Modell "geladen"
+
+        compare(mgr.isRemote, true)
+        compare(mgr.remoteAvailable, true)
+        verify(mgr.apiBase() === "http://lan:11434")
+
+        // Server geht offline: Re-Probe (neue Epoche) schlägt fehl
+        mockHttp.calls = []
+        mgr.refresh()
+        var iProbe2 = mockHttp.find("http://lan:11434/api/tags")
+        verify(iProbe2 !== -1)
+        mockHttp.answer(iProbe2, { "ok": false })   // Server nicht erreichbar
+
+        compare(mgr.remoteAvailable, false)
+        compare(mgr.remoteClient.baseUrl, "")
+        compare(mgr.remoteClient.models.length, 0)
+        compare(mgr.isRemote, false)                 // Fallback: Auto/lokal
+        verify(!(mgr.isRemote && mgr.apiBase() === ""))   // nie an leere baseUrl senden
+        compare(mgr.activeModel, "gemma4:e4b")       // balanced-Profil, jetzt lokal
+        var iNeu = mockHttp.find("http://local:11434/api/chat")
+        verify(iNeu !== -1)                          // Preload läuft jetzt LOKAL
+    }
+
+    // Audit-Fix Task 3 (Fast-Follow): probeBackends() leert remoteClient.baseUrl
+    // SOFORT (synchron), bevor eine Probe-Antwort da ist — isRemote bleibt bis
+    // dahin unverändert true. Genau in diesem Fenster darf activeClient() NICHT
+    // remoteClient (baseUrl "") liefern, sonst bauen chat()/embed()/preload()
+    // "" + "/api/chat" und senden an einen leeren Host.
+    function test_activeClientWeichtBeiLeererRemoteBaseUrlAufLokalAus() {
+        // Remote zunächst erfolgreich anwählen
+        ConfigStore.setValue("remoteEndpoint", "http://lan:11434")
+        mgr.refresh()
+        var iProbe = mockHttp.find("http://lan:11434/api/tags")
+        mockHttp.answer(iProbe, _tags(["gross:31b"]))
+        var iRefresh = mockHttp.find("http://lan:11434/api/tags", iProbe + 1)
+        mockHttp.answer(iRefresh, _tags(["gross:31b"]))
+        mockHttp.answer(mockHttp.find("http://lan:11434/api/ps"), { "ok": true, "data": { "models": [] } })
+        mgr.selectModel("remote:gross:31b")
+        mockHttp.answer(mockHttp.find("http://lan:11434/api/chat"), { "ok": true })
+        compare(mgr.isRemote, true)
+        verify(mgr.apiBase() === "http://lan:11434")   // Kontrolle: normale Auswahl unverändert
+
+        // Re-Probe: baseUrl wird sofort geleert, isRemote bleibt bis zur
+        // Probe-Antwort true — DAS ist das Fenster.
+        mockHttp.calls = []
+        mgr.refresh()
+        compare(mgr.remoteClient.baseUrl, "")
+        compare(mgr.isRemote, true)                        // Fenster: noch "remote", aber leer
+        verify(mgr.activeClient() === mgr.localClient)      // Guard: weicht auf lokal aus
+        verify(mgr.apiBase() === "http://local:11434")      // nie "" + "/api/..."
+
+        // chat()/embed()/preload laufen über activeClient() -> treffen im
+        // Fenster ebenfalls den lokalen, nicht den leeren Client.
+        var out = "unset"
+        mgr.embed("nomic-embed-text", "Frage", function(v) { out = v })
+        verify(mockHttp.find("http://local:11434/api/embed") !== -1)
+    }
+
     function test_embed_delegiertAnAktivesBackend() {
         // Standard: isRemote=false -> localClient (baseUrl local), http=mockHttp
         var out = "unset"

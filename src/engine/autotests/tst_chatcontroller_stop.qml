@@ -21,16 +21,26 @@ Item {
         function permissionFor(n){ return perm[n] || "auto" } function categoryOf(n){ return "local" }
         function describe(n,a){ return n } function execute(n,a,c,done){ execLog.push(n); done("R",{status:"ok"}) }
         property bool abortCalled: false; function abortRunning(){ abortCalled = true } }
+    // FileIO-Mock: readText/standardPath wie der Null-Fall (ok:false / Dummy-Pfad),
+    // damit _systemPrompt() unverändert läuft; readBase64 liest aus `files` (Pfad->b64)
+    // — steuert den Reload-Regenerate-Disk-Fallback (Task 10, Fix nach Review).
+    QtObject { id: fileioMock; property var files: ({})
+        function readBase64(path){ return files[path] !== undefined
+            ? ({ "ok": true, "data": files[path], "mime": "image/png", "error": "" })
+            : ({ "ok": false, "data": "", "mime": "", "error": "nicht gefunden" }) }
+        function readText(path, max){ return ({ "ok": false, "text": "", "error": "" }) }
+        function standardPath(kind){ return "/h/.local/share/aurora" } }
 
     // echte 5b-Logikbausteine injizieren (sonst wirft der guardlose _decide null.decide)
     PermissionResolver { id: realResolver }
     GrantStore { id: realGrants }
 
     property var lastJob: null
+    property var lastReq: null
     ChatController { id: ctl; store: storeMock; settings: settingsMock; registry: registryMock
-        resolver: realResolver; grants: realGrants
+        resolver: realResolver; grants: realGrants; fileio: fileioMock
         activeModel: "m"; activeCaps: ["tools"]; homeDir: "/h"
-        chatFn: function(req){ var j = jobComp.createObject(ctl); lastJob = j; return j } }
+        chatFn: function(req){ lastReq = req; var j = jobComp.createObject(ctl); lastJob = j; return j } }
     function call(n,a){ return { "function": { "name": n, "arguments": a||{} } } }
 
     TestCase {
@@ -39,7 +49,8 @@ Item {
                          storeMock.rows=[]; storeMock._n=0; ctl.conversationId="c1"; ctl._messages=[]
                          registryMock.execLog=[]; registryMock.abortCalled=false; registryMock.perm={}
                          realGrants.clearConversation("c1")
-                         ctl.state="idle"; ctl._activeJob=null }
+                         fileioMock.files=({})
+                         ctl.state="idle"; ctl._activeJob=null; lastReq=null }
 
         function test_stopDuringStreamPersistsAborted() {
             ctl.send("Hi", null)
@@ -85,6 +96,70 @@ Item {
             // letzte assistant + user aus DB gelöscht, neuer Zug gestartet
             verify(storeMock.deleted.length >= 2)
             verify(ctl.busy)
+        }
+
+        // regenerate() darf den Bild-Kontext des letzten User-Zuges nicht verwerfen
+        // (Audit ChatController.qml:616/Task 10, Fix B) — sonst wird aus einer
+        // Vision-Antwort eine unpassende Text-Antwort.
+        function test_regenerateKeepsImageContext() {
+            ctl.send("Bildfrage", { images: ["b64daten"], imagePath: "/tmp/bild.png", displayText: "Bildfrage  📎 bild.png" })
+            lastJob.done({ content:"Antwort", thinking:"", toolCalls:[] })
+            ctl.regenerate()
+            // Neuer Request an chatFn enthält wieder das Bild in der letzten user-Nachricht.
+            verify(lastReq !== null)
+            var msgs = lastReq.messages
+            var lastUserMsg = null
+            for (var i = msgs.length - 1; i >= 0; i--) {
+                if (msgs[i].role === "user") { lastUserMsg = msgs[i]; break }
+            }
+            verify(lastUserMsg !== null)
+            verify(lastUserMsg.images !== undefined)
+            compare(lastUserMsg.images[0], "b64daten")
+            // ListModel-Zeile zeigt den Bildpfad wieder an (Bubble-Anzeige).
+            compare(ctl.chatModel.get(0).mediaPath, "/tmp/bild.png")
+            compare(ctl.chatModel.get(0).text, "Bildfrage  📎 bild.png")
+        }
+
+        // Nach Reload trägt _messages KEINE base64-images (nicht persistiert), nur der
+        // mediaPath ist aus der DB da. regenerate() muss die Bytes von der Platte
+        // nachladen, damit der Request das Bild wieder trägt (Task 10, Fix nach Review).
+        function test_regenerateReloadReadsImageFromDisk() {
+            fileioMock.files = { "/tmp/bild.png": "b64vonplatte" }
+            storeMock.rows = [
+                { id:"r1", role:"user", content:"Bildfrage", status:"final", createdAt:0, thinking:"", mediaPath:"/tmp/bild.png" },
+                { id:"r2", role:"assistant", content:"Antwort", status:"final", createdAt:0, thinking:"" }
+            ]
+            ctl.loadConversation("c9")
+            verify(ctl._messages[0].images === undefined)     // Reload verliert die base64-Bytes
+            ctl.regenerate()
+            var msgs = lastReq.messages
+            var lastUserMsg = null
+            for (var i = msgs.length - 1; i >= 0; i--)
+                if (msgs[i].role === "user") { lastUserMsg = msgs[i]; break }
+            verify(lastUserMsg !== null)
+            verify(lastUserMsg.images !== undefined)          // Bytes von der Platte im Request
+            compare(lastUserMsg.images[0], "b64vonplatte")
+            compare(ctl.chatModel.get(0).mediaPath, "/tmp/bild.png")   // Thumbnail bleibt (Bytes da)
+        }
+
+        // Datei nach Reload verschwunden: readBase64 schlägt fehl -> ehrlich Text-only,
+        // KEINE irreführende Bild-Bubble (kein imagePath), Zug läuft trotzdem.
+        function test_regenerateReloadFileGoneNoMisleadingThumbnail() {
+            fileioMock.files = ({})                            // Datei nicht auffindbar
+            storeMock.rows = [
+                { id:"r1", role:"user", content:"Bildfrage", status:"final", createdAt:0, thinking:"", mediaPath:"/tmp/weg.png" },
+                { id:"r2", role:"assistant", content:"Antwort", status:"final", createdAt:0, thinking:"" }
+            ]
+            ctl.loadConversation("c9")
+            ctl.regenerate()
+            var msgs = lastReq.messages
+            var lastUserMsg = null
+            for (var i = msgs.length - 1; i >= 0; i--)
+                if (msgs[i].role === "user") { lastUserMsg = msgs[i]; break }
+            verify(lastUserMsg !== null)
+            verify(lastUserMsg.images === undefined)           // kein Bild im Request
+            compare(ctl.chatModel.get(0).mediaPath, "")        // KEINE irreführende Bild-Bubble
+            verify(ctl.busy)                                   // Text-only-Zug lief trotzdem
         }
 
         function test_loadConversationRebuildsModel() {

@@ -95,6 +95,61 @@ private Q_SLOTS:
         QVERIFY(r.value("error").toString().contains("JSON"));
     }
 
+    // Regressionstest fuer http.cpp:101 — ein leerer 2xx-Body (z.B. 204 No
+    // Content) ist legitim und darf NICHT als "Ungueltiges JSON" gemeldet werden.
+    void getJson_leererBody2xx_liefertErfolg()
+    {
+        TestHttpServer server;
+        server.setResponse(200, "");
+        HttpFixture f;
+        f.http->getJson(server.baseUrl() + "/x", f.callback());
+        const QVariantMap r = f.wait();
+        QCOMPARE(r.value("ok").toBool(), true);
+        QCOMPARE(r.value("status").toInt(), 200);
+        QVERIFY(r.value("data").toMap().isEmpty());
+        QVERIFY(r.value("error").toString().isEmpty());
+    }
+
+    // Whitespace-only Body zaehlt ebenso als leer (kuenstliche Server manchmal
+    // ein einzelnes "\n" statt eines wirklich leeren Bodys).
+    void getJson_whitespaceBody2xx_liefertErfolg()
+    {
+        TestHttpServer server;
+        server.setResponse(200, "   \n\t  ");
+        HttpFixture f;
+        f.http->getJson(server.baseUrl() + "/x", f.callback());
+        const QVariantMap r = f.wait();
+        QCOMPARE(r.value("ok").toBool(), true);
+        QVERIFY(r.value("data").toMap().isEmpty());
+    }
+
+    // 204-Antworten (z.B. Ollama /api/delete) muessen ebenso als Erfolg
+    // durchgehen, ueber postJson genauso wie ueber getJson.
+    void postJson_leererBody204_liefertErfolg()
+    {
+        TestHttpServer server;
+        server.setResponse(204, "");
+        HttpFixture f;
+        f.http->postJson(server.baseUrl() + "/x", QVariantMap(), f.callback());
+        const QVariantMap r = f.wait();
+        QCOMPARE(r.value("ok").toBool(), true);
+        QCOMPARE(r.value("status").toInt(), 204);
+    }
+
+    // Regressionsschutz: ein nicht-leerer, aber wirklich kaputter Body auf 2xx
+    // muss weiterhin als Fehler gemeldet werden (nicht durch den Empty-Body-Fix
+    // verschluckt werden).
+    void getJson_nichtLeererMuellBody2xx_liefertWeiterhinFehler()
+    {
+        TestHttpServer server;
+        server.setResponse(200, "{ kaputt", "text/plain");
+        HttpFixture f;
+        f.http->getJson(server.baseUrl() + "/x", f.callback());
+        const QVariantMap r = f.wait();
+        QCOMPARE(r.value("ok").toBool(), false);
+        QVERIFY(r.value("error").toString().contains("Ungültiges JSON"));
+    }
+
     void postJson_serialisiertBodyUndContentType()
     {
         TestHttpServer server;

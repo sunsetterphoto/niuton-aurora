@@ -22,17 +22,28 @@ Item {
     // verschluckt (start() auf laufendem Runner ist ein No-op).
     property string _pendingText: ""
 
+    // Meldet TTS-Fehler nach außen (AuroraController zeigt sie als transienten
+    // Status). Wird NICHT emittiert, wenn gerade ein neuer speak()-Aufruf den
+    // alten Lauf abgelöst hat (_pendingText gesetzt) — das ist kein Nutzer-
+    // sichtbarer Fehler, sondern der interne Neustart-Pfad.
+    signal errorOccurred(string message)
+
     ProcessRunner {
         id: piperProc
         onFinished: function(code, out, err, trunc, to) {
             if (speaker._pendingText !== "") { speaker._maybeStartPending(); return }
             if (!speaker.speaking) return              // per stop() abgebrochen
-            if (code !== 0) { speaker.speaking = false; return }
+            if (code !== 0) {
+                speaker.speaking = false
+                speaker.errorOccurred("Sprachausgabe fehlgeschlagen" + (err ? ": " + err : ""))
+                return
+            }
             aplayProc.start("aplay", ["-q", speaker._wav])
         }
         onFailed: function(m) {
-            if (speaker._pendingText !== "") speaker._maybeStartPending()
-            else speaker.speaking = false
+            if (speaker._pendingText !== "") { speaker._maybeStartPending(); return }
+            speaker.speaking = false
+            speaker.errorOccurred("Sprachausgabe fehlgeschlagen: " + m)
         }
     }
 
@@ -43,18 +54,24 @@ Item {
             speaker.speaking = false
         }
         onFailed: function(m) {
-            if (speaker._pendingText !== "") speaker._maybeStartPending()
-            else speaker.speaking = false
+            if (speaker._pendingText !== "") { speaker._maybeStartPending(); return }
+            speaker.speaking = false
+            speaker.errorOccurred("Sprachausgabe fehlgeschlagen: " + m)
         }
     }
 
     // Probe: aplay muss startbar sein, piper-Binary und Stimme müssen existieren.
+    // Piper braucht NEBEN voice.onnx auch voice.onnx.json (Modell-Konfiguration) —
+    // ohne die JSON-Datei meldet sich die Stimme sonst fälschlich verfügbar und
+    // scheitert erst beim ersten speak() still (piper bricht ab, onFailed/Exit
+    // ungesehen ohne diesen Fix).
     ProcessRunner {
         id: aplayProbe
         onFinished: function(code, out, err, trunc, to) {
             speaker.available = (code === 0)
                 && FileIO.exists(speaker._piper)
                 && FileIO.exists(speaker._voiceDir + speaker.voice + ".onnx")
+                && FileIO.exists(speaker._voiceDir + speaker.voice + ".onnx.json")
         }
         onFailed: function(m) { speaker.available = false }
     }

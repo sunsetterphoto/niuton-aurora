@@ -91,5 +91,21 @@ Item {
                 if (storeMock.appended[i].mediaPath === "/img.png") found = true
             verify(found)
         }
+
+        // Task 4 (Fix nach Review): tool-initiiertes Bild erscheint sichtbar +
+        // persistiert, aber KEIN assistant-Eintrag in die API-History (_messages) —
+        // sonst zerreißt die Reihenfolge zwischen assistant(tool_calls) und dem
+        // tool-Ergebnis. Manuelles Bild (Flag false/undefined) gehört sehr wohl rein.
+        function test_toolImageNotPushedToApiHistory() {
+            var before = ctl._messages.length
+            ctl.appendGeneratedImage("/t.png", "x", true)
+            compare(ctl._messages.length, before)                              // NICHT in _messages
+            compare(ctl.chatModel.get(ctl.chatModel.count - 1).mediaPath, "/t.png")  // aber sichtbar
+        }
+        function test_manualImagePushedToApiHistory() {
+            var before = ctl._messages.length
+            ctl.appendGeneratedImage("/m.png", "y", false)
+            compare(ctl._messages.length, before + 1)                          // manuell: in _messages
+        }
     }
 }

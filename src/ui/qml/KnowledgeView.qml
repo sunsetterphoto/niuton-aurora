@@ -59,7 +59,8 @@ Rectangle {
         s = String(s || "").replace(/\s+/g, " ").trim()
         return s.length > n ? s.substring(0, n) + "…" : s
     }
-    function _canSave(title, content) {
+    function _canSave(kind, title, url, content) {
+        if (String(url || "").trim() !== "") return true
         return String(title || "").trim() !== "" || String(content || "").trim() !== ""
     }
 
@@ -82,7 +83,7 @@ Rectangle {
     }
     function _cancel() { _formOpen = false; _editingId = "" }
     function _emitSave(kind, title, url, content) {
-        if (!_canSave(title, content)) return
+        if (!_canSave(kind, title, url, content)) return
         if (_editingId === "") knowledge.addRequested(kind, title, url, content)
         else knowledge.editRequested(_editingId, kind, title, url, content)
         _formOpen = false
@@ -171,7 +172,8 @@ Rectangle {
                     QQC2.Button {
                         text: "Speichern"
                         highlighted: true
-                        enabled: knowledge._canSave(titleField.text, contentArea.text)
+                        enabled: knowledge._canSave(kindCombo.currentValue, titleField.text,
+                                                     urlField.text, contentArea.text)
                         onClicked: knowledge._emitSave(kindCombo.currentValue, titleField.text,
                                                        urlField.text, contentArea.text)
                     }

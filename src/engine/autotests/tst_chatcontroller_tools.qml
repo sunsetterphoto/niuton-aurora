@@ -129,6 +129,38 @@ Item {
             compare(ctl.state, "idle")
         }
 
+        // Hartes Rundenlimit (Audit ChatController.qml:390): der Cap steuerte bisher
+        // nur, ob Tools ANGEBOTEN werden (req.tools) — nicht, ob die Schleife weiter-
+        // läuft. Liefert das Backend TROTZDEM tool_calls in der tools-losen Folge-
+        // Antwort (Runde nach dem Limit), muss das ignoriert werden: keine weitere
+        // Ausführung, kein zweiter „Rundenlimit"-Hinweis, State landet in idle.
+        function test_hardRoundCeiling_ignoresToolCallsAfterCap() {
+            settingsMock.toolMaxRounds = 2
+            ctl.send("Backend hält sich nicht an das Limit", null)
+            // Runde 1
+            lastJob.done({ content: "", thinking: "", toolCalls: [ call("read_file", { path: "/1" }) ] })
+            // Runde 2 = Limit erreicht -> _afterRound hängt die Rundenlimit-Notiz an
+            // und startet die Folge-Anfrage OHNE tools (reqLog[2].tools === undefined)
+            lastJob.done({ content: "", thinking: "", toolCalls: [ call("read_file", { path: "/2" }) ] })
+            // Das Backend ignoriert das fehlende tools-Feld und liefert TROTZDEM
+            // weiter tool_calls auf die tools-lose Folge-Anfrage.
+            lastJob.done({ content: "", thinking: "", toolCalls: [ call("read_file", { path: "/3" }) ] })
+
+            // Cap: genau 2 Tool-Ausführungen (eine je Runde bis zum Limit) — NICHT 3.
+            compare(registryMock.execLog.length, 2)
+            // _round darf den Cap nicht überschreiten.
+            verify(ctl._round <= settingsMock.toolMaxRounds)
+            // State darf nicht in toolRunning/streaming klemmen bleiben.
+            compare(ctl.state, "idle")
+            // Rundenlimit-Notiz höchstens einmal im Kontext (nicht pro ignoriertem Versuch).
+            var noticeCount = 0
+            for (var i = 0; i < ctl._messages.length; i++) {
+                if (ctl._messages[i].content && ctl._messages[i].content.indexOf("Rundenlimit erreicht") !== -1)
+                    noticeCount++
+            }
+            compare(noticeCount, 1)
+        }
+
         function test_turnIdPersistedPerTurn() {
             ctl.send("Erster Zug", null)
             lastJob.done({ content: "Antwort 1", thinking: "", toolCalls: [] })

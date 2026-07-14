@@ -53,7 +53,14 @@ ColumnLayout {
         id: scrollTimer
         interval: 50
         repeat: false
-        onTriggered: listView.positionViewAtEnd()
+        // Bei Ausführung erneut prüfen: restart() bewaffnet einen 50-ms-Timer,
+        // der nicht storniert wird, wenn stickToBottom in der Zwischenzeit auf
+        // false kippt (Nutzer scrollt hoch). Ohne diese Prüfung würde der
+        // bereits bewaffnete Timer trotzdem ans Ende springen und den
+        // Scrollversuch überschreiben. Der Neue-Nachricht-Pfad (onCountChanged)
+        // setzt stickToBottom synchron vor restart() auf true — die Prüfung
+        // besteht dort also, der Sprung ans Ende bleibt erhalten.
+        onTriggered: if (listView.stickToBottom) listView.positionViewAtEnd()
     }
 
     // ---------- Nachrichtenliste ----------
@@ -66,6 +73,13 @@ ColumnLayout {
             spacing: Kirigami.Units.smallSpacing
             clip: true
 
+            // "Kleben" am Listenende: nur automatisch mitscrollen, solange
+            // der Nutzer nicht manuell hochgescrollt hat. Wird ausschließlich
+            // bei echten contentY-Änderungen aktualisiert (Wheel/Scrollbar/
+            // Touch/eigenes positionViewAtEnd) — reines Höhenwachstum ändert
+            // contentY nicht und kippt das Flag daher nicht ungewollt.
+            property bool stickToBottom: true
+
             delegate: MessageBubble {
                 required property int index
                 width: listView.width
@@ -77,10 +91,18 @@ ColumnLayout {
                 onRateRequested: function(msgId, rating) { chatViewRoot.rateRequested(msgId, rating) }
             }
 
-            // Neue Nachricht -> ans Ende. Zusätzlich dem in-place wachsenden
-            // Streaming-Text folgen (count ändert sich beim Streaming nicht).
-            onCountChanged: scrollTimer.restart()
-            onContentHeightChanged: if (chatViewRoot.busy) scrollTimer.restart()
+            // Neue Nachricht -> ans Ende und wieder "kleben", auch wenn der
+            // Nutzer vorher hochgescrollt hatte.
+            onCountChanged: {
+                stickToBottom = true
+                scrollTimer.restart()
+            }
+            // Dem wachsenden Streaming-Text nur folgen, solange die Ansicht
+            // am Ende klebt. Scrollt der Nutzer während des Streamens hoch,
+            // bleibt die Position erhalten; scrollt er zurück ans Ende,
+            // setzt onContentYChanged stickToBottom wieder auf true.
+            onContentHeightChanged: if (chatViewRoot.busy && stickToBottom) scrollTimer.restart()
+            onContentYChanged: stickToBottom = atYEnd
         }
     }
 

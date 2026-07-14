@@ -102,8 +102,11 @@ RowLayout {
                 color: modelData.ok
                     ? Theme.withAlpha(Kirigami.Theme.positiveTextColor, 0.9)
                     : Theme.withAlpha(Kirigami.Theme.textColor, 0.25)
+                HoverHandler { id: dotHover }
                 QQC2.ToolTip {
                     text: modelData.name + (modelData.ok ? " · verbunden" : " · offline")
+                    visible: dotHover.hovered
+                    delay: Kirigami.Units.toolTipDelay
                 }
             }
         }
@@ -117,14 +120,33 @@ RowLayout {
         color: header.modelLoading ? Kirigami.Theme.neutralTextColor
              : header.modelLoaded ? Kirigami.Theme.positiveTextColor
              : Kirigami.Theme.negativeTextColor
+        HoverHandler { id: modelLedHover }
         QQC2.ToolTip {
             text: header.modelLoading ? "Modell wird geladen..."
                 : header.modelLoaded ? header.activeModel + " bereit"
                 : "Modell nicht geladen"
+            visible: modelLedHover.hovered
+            delay: Kirigami.Units.toolTipDelay
         }
     }
 
     // Model selector (gruppiert: Auto / Lokal / Remote)
+    // currentIndex wird imperativ synchronisiert statt deklarativ gebunden:
+    // QQC2.ComboBox schreibt currentIndex bei User-Aktivierung selbst imperativ,
+    // was eine deklarative Bindung dauerhaft bricht — danach folgt sie externen
+    // selectedModel-Änderungen (Auto-Wechsel, loadConversation) nicht mehr.
+    function _syncCurrentIndex() {
+        for (var i = 0; i < header.pickerEntries.length; i++) {
+            if (header.pickerEntries[i].value === header.selectedModel) {
+                modelSelector.currentIndex = i
+                return
+            }
+        }
+        modelSelector.currentIndex = 0
+    }
+    onSelectedModelChanged: _syncCurrentIndex()
+    onPickerEntriesChanged: _syncCurrentIndex()
+
     QQC2.ComboBox {
         id: modelSelector
         Layout.preferredWidth: Kirigami.Units.gridUnit * 10
@@ -132,13 +154,7 @@ RowLayout {
         displayText: header.selectedModel === "auto"
             ? "Auto · " + header.activeModel
             : (header.isRemoteModel ? "🌐 " : "") + header.activeModel
-        currentIndex: {
-            for (var i = 0; i < header.pickerEntries.length; i++) {
-                if (header.pickerEntries[i].value === header.selectedModel)
-                    return i
-            }
-            return 0
-        }
+        Component.onCompleted: header._syncCurrentIndex()
         delegate: QQC2.ItemDelegate {
             required property var modelData
             required property int index

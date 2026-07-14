@@ -52,7 +52,7 @@ QtObject {
     function regenerate() { _ctl.regenerate() }
     function newConversation() { _ctl.newConversation() }
     function loadConversation(id) { _ctl.loadConversation(id) }
-    function appendGeneratedImage(p, t) { _ctl.appendGeneratedImage(p, t) }
+    function appendGeneratedImage(p, t, toolInitiated) { _ctl.appendGeneratedImage(p, t, toolInitiated) }
     function rateMessage(msgId, rating) { _ctl.rateMessage(msgId, rating) }
 
     // Konversations-API
@@ -89,12 +89,22 @@ QtObject {
     // Best-effort + feature-detektiert (spiegelt ChatController._syncEmbedding):
     // Titel+Inhalt einbetten und den Vektor auf DIESEN Eintrag legen. Leerer Text
     // -> Vektor löschen. Embed-Fehler (r == null) -> alten Vektor stehen lassen.
+    //
+    // Request-Token je id (analog ChatController._embedTokens): schnelles
+    // Editieren-zu-leer, während der Embed noch läuft, darf keinen Orphan-Vektor
+    // hinterlassen. Jeder Aufruf (auch die synchrone Clear-Variante) bumpt den
+    // Token; ein verspäteter Callback mit veraltetem Token wird verworfen.
+    property var _knowledgeEmbedTokens: ({})   // id -> monotone Nummer
+
     function _embedKnowledge(id, title, content) {
         if (!engine.store || typeof engine.store.setKnowledgeEmbedding !== "function") return
+        var tok = (engine._knowledgeEmbedTokens[id] || 0) + 1
+        engine._knowledgeEmbedTokens[id] = tok
         var text = ((title || "") + "\n" + (content || "")).trim()
         if (text === "") { engine.store.setKnowledgeEmbedding(id, [], ""); return }
         if (!engine.embedFn) return
         engine.embedFn(text, function(r) {
+            if (engine._knowledgeEmbedTokens[id] !== tok) return   // Zustand hat sich geändert -> verwerfen
             if (r && r.vec && r.vec.length > 0) engine.store.setKnowledgeEmbedding(id, r.vec, r.model)
         })
     }

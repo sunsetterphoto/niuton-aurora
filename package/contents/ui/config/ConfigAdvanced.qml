@@ -79,7 +79,8 @@ KCM.SimpleKCM {
         QQC2.Label {
             visible: statusMessage !== ""
             text: statusMessage
-            color: Kirigami.Theme.positiveTextColor
+            color: statusMessage.indexOf("Fehler") === 0 ? Kirigami.Theme.negativeTextColor : Kirigami.Theme.positiveTextColor
+            wrapMode: Text.Wrap
         }
     }
 
@@ -100,8 +101,21 @@ KCM.SimpleKCM {
         }
         onAccepted: {
             if (what === "conversations") {
+                var openResult = ConversationStore.open()
+                if (!openResult.ok) {
+                    root.statusMessage = "Fehler: Konversations-Datenbank konnte nicht geöffnet werden (" + openResult.error + ")."
+                    return
+                }
+                var convs = ConversationStore.listConversations()
+                for (var i = 0; i < convs.length; i++)
+                    ConversationStore.deleteConversation(convs[i].id)
                 root.statusMessage = "Konversationen gelöscht. Widget neu öffnen."
             } else if (what === "memory") {
+                var writeResult = FileIO.writeText(FileIO.standardPath("appData") + "/memory.md", "")
+                if (!writeResult.ok) {
+                    root.statusMessage = "Fehler: Memory konnte nicht zurückgesetzt werden (" + writeResult.error + ")."
+                    return
+                }
                 root.statusMessage = "Memory zurückgesetzt. Widget neu öffnen."
             } else if (what === "settings") {
                 ConfigStore.reset()

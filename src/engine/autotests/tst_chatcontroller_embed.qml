@@ -8,6 +8,8 @@ Item {
     property var embedResult: null    // was die Mock-embedFn zurückgibt
     property string embedInput: ""
     property int embedCalls: 0
+    property bool delayEmbed: false   // true -> Callback wird NICHT sofort gefeuert, sondern gespeichert
+    property var _pendingCb: null
 
     QtObject {
         id: storeMock
@@ -41,6 +43,7 @@ Item {
         embedFn: function(input, cb) {
             root.embedInput = input
             root.embedCalls++
+            if (root.delayEmbed) { root._pendingCb = cb; return }
             cb(root.embedResult)
         }
     }
@@ -57,6 +60,8 @@ Item {
             root.embedResult = null
             root.embedInput = ""
             root.embedCalls = 0
+            root.delayEmbed = false
+            root._pendingCb = null
         }
 
         function test_daumenHoch_bettetFrageEinUndSpeichertVektor() {
@@ -99,6 +104,27 @@ Item {
             ctl.rateMessage("a1", 1)
             compare(root.embedCalls, 0)
             compare(storeMock.embeddingCount, 0)
+        }
+
+        // Race: 👍 (Embed in flight) gefolgt von schnellem Zurücknehmen (synchrones
+        // Clear) — der verspätete Embed-Callback darf danach KEINEN Orphan-Vektor
+        // mehr schreiben. Request-Token je msgId (siehe _syncEmbedding).
+        function test_schnellerRatingWechsel_verwirftVeraltetenEmbedCallback() {
+            storeMock.questionReturn = "Frage"
+            root.embedResult = { "vec": [0.1, 0.2], "model": "nomic-embed-text" }
+            ctl._appendRow({ msgId: "a1", isUser: false, text: "Antwort" })
+            root.delayEmbed = true
+            ctl.rateMessage("a1", 1)               // Embed in flight, Callback gespeichert statt gefeuert
+            compare(root.embedCalls, 1)
+            compare(storeMock.embeddingCount, 0)   // noch nichts geschrieben
+            root.delayEmbed = false
+            ctl.rateMessage("a1", 0)               // schnelles Zurücknehmen: synchrones Clear
+            compare(storeMock.clearCount, 1)
+            var pending = root._pendingCb
+            verify(pending !== null)
+            pending({ "vec": [0.1, 0.2], "model": "nomic-embed-text" })   // verspäteter Callback feuert jetzt
+            compare(storeMock.embeddingCount, 0)          // KEIN Orphan-Vektor
+            compare(storeMock.lastEmbedding.vec.length, 0) // letzter Schreibvorgang bleibt das Clear
         }
     }
 }

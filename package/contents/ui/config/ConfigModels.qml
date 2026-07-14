@@ -10,12 +10,20 @@ KCM.SimpleKCM {
 
     property var localModelNames: []
     property string testStatus: ""
+    // Feedback für die Auto-Modus-Dropdowns: bleibt leer, solange /api/tags
+    // erreichbar ist; sonst Hinweis, damit leere Dropdowns nicht wie ein
+    // Defekt aussehen (analog zum Remote-/Comfy-testStatus).
+    property string localStatus: ""
 
     Component.onCompleted: refreshLocalModels()
 
     function refreshLocalModels() {
         Http.getJson("http://127.0.0.1:11434/api/tags", function(res) {
-            if (!res.ok) return
+            if (!res.ok) {
+                root.localStatus = "Lokales Ollama nicht erreichbar"
+                return
+            }
+            root.localStatus = ""
             var names = []
             var list = (res.data && res.data.models) || []
             for (var i = 0; i < list.length; i++) {
@@ -76,6 +84,15 @@ KCM.SimpleKCM {
         ModelCombo {
             Kirigami.FormData.label: "Leistung:"
             configKey: "modelPerformance"
+        }
+
+        QQC2.Label {
+            visible: root.localStatus !== ""
+            text: root.localStatus
+            wrapMode: Text.Wrap
+            opacity: 0.8
+            color: Kirigami.Theme.negativeTextColor
+            Layout.maximumWidth: Kirigami.Units.gridUnit * 25
         }
 
         Kirigami.Separator {

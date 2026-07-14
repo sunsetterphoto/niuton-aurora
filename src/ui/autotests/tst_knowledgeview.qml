@@ -56,10 +56,11 @@ Item {
             verify(view._kindIcon("fact") !== "")
         }
         function test_canSave() {
-            verify(!view._canSave("", ""))
-            verify(!view._canSave("   ", "  "))
-            verify(view._canSave("Titel", ""))
-            verify(view._canSave("", "Inhalt"))
+            verify(!view._canSave("note", "", "", ""))
+            verify(!view._canSave("note", "  ", "", "  "))
+            verify(view._canSave("note", "Titel", "", ""))
+            verify(view._canSave("note", "", "", "Inhalt"))
+            verify(view._canSave("link", "", "https://x", ""))   // nur URL -> speicherbar
         }
         function test_startAdd_undStartEdit_setzenModus() {
             view._startEdit({ "id": "x", "kind": "fact", "title": "T", "url": "U", "content": "C" })

@@ -9,6 +9,16 @@ Item {
     property bool available: false
     property bool busy: false
     property string statusText: ""
+    // Vom Aufrufer VOR generate() gesetzt (params.toolInitiated) — unterscheidet
+    // tool- von manuell-initiierten Generierungen auf DERSELBEN Instanz. Steuert
+    // im AuroraController-Handler, ob das Bild zusätzlich in die API-History
+    // geschoben wird (Tool-Weg: nein, s. appendGeneratedImage) (Task 4).
+    property bool toolInitiated: false
+    // Konversation, in der DIESE Generierung gestartet wurde (params.originConvId,
+    // von BEIDEN Aufrufern gesetzt — manuell wie Tool). Der onFinished-Handler
+    // hängt das fertige Bild nur an, wenn die Konversation unverändert ist, sonst
+    // wird es verworfen (einheitlicher Guard über beide Wege, Fix 2 nach Re-Review).
+    property string originConvId: ""
 
     // Anzeigename -> Workflow-Template in workflows/
     readonly property var models: [
@@ -31,12 +41,18 @@ Item {
         })
     }
 
+    // Endpoint kann sich zur Laufzeit ändern (ComfyUI aus/an, Adresse editiert) —
+    // ohne Neubewertung bliebe "available" bis zum nächsten activate() veraltet.
+    onEndpointChanged: checkAvailability()
+
     // params: { prompt, model, width, height, seed (optional) }
     function generate(params) {
         if (busy) { failed("Es läuft bereits eine Generierung"); return }
         busy = true
         statusText = "Lade Workflow..."
         _promptText = params.prompt
+        toolInitiated = !!params.toolInitiated
+        originConvId = params.originConvId || ""
 
         var tplPath = FileIO.standardPath("appData") + "/workflows/" + (params.model || "z_image_turbo") + ".json"
         var tpl = FileIO.readText(tplPath, 262144)
@@ -46,6 +62,10 @@ Item {
             wf = JSON.parse(tpl.text)
         } catch(e) {
             _fail("Workflow-Template nicht lesbar")
+            return
+        }
+        if (!wf.pos || !wf.pos.inputs || !wf.latent || !wf.latent.inputs || !wf.sampler || !wf.sampler.inputs) {
+            _fail("Workflow-Template unpassend (fehlender Node)")
             return
         }
         wf.pos.inputs.text = params.prompt
@@ -124,6 +144,7 @@ Item {
             } else {
                 comfy.failed("Bild konnte nicht gespeichert werden")
             }
+            comfy.toolInitiated = false    // Lauf abgeschlossen -> Markierung zurücksetzen
         }, 60000)
     }
 
@@ -132,5 +153,6 @@ Item {
         busy = false
         statusText = ""
         failed(message)
+        toolInitiated = false
     }
 }

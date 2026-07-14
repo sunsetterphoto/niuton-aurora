@@ -15,6 +15,17 @@ Rectangle {
     signal loadRequested(string convId)
     signal deleteRequested(string convId)
 
+    // Löschen-Bestätigung: id der Zeile, die auf den zweiten (bestätigenden)
+    // Klick wartet. "" = keine Zeile bestätigungsbereit. Zurückgesetzt beim
+    // Verlassen der Zeile (HoverHandler) oder Klick woanders (Laden/Neuer Chat).
+    property string _confirmId: ""
+
+    // Bei Modell-Refresh (conversations neu zugewiesen — passiert praktisch bei
+    // jedem Chat-Zug via refreshConversationList()) werden alle Delegates neu
+    // erzeugt; ein bewaffneter Zustand darf nicht auf dem Root überleben, sonst
+    // "bewaffnet" sich die neu erzeugte Zeile ohne Nutzeraktion selbst wieder.
+    onConversationsChanged: _confirmId = ""
+
     clip: true
     color: Theme.withAlpha(Kirigami.Theme.textColor, 0.03)
 
@@ -37,7 +48,10 @@ Rectangle {
             icon.name: "list-add"
             text: "Neuer Chat"
             enabled: sidebar.canNewChat
-            onClicked: sidebar.newChatRequested()
+            onClicked: {
+                sidebar._confirmId = ""
+                sidebar.newChatRequested()
+            }
         }
 
         Kirigami.Separator { Layout.fillWidth: true }
@@ -84,7 +98,11 @@ Rectangle {
                         }
 
                         QQC2.Label {
-                            text: sidebar._prettyDate(modelData.created_at)
+                            // Liste ist nach updated_at (letzte Aktivität) sortiert —
+                            // hier dasselbe Feld zeigen, sonst widerspricht das Datum
+                            // der Reihenfolge. Fallback auf created_at zur Sicherheit
+                            // (z. B. falls updated_at mal fehlt).
+                            text: sidebar._prettyDate(modelData.updated_at || modelData.created_at)
                             font.pointSize: Kirigami.Theme.smallFont.pointSize - 1
                             opacity: 0.5
                             color: modelData.id === sidebar.currentId
@@ -94,20 +112,42 @@ Rectangle {
                     }
 
                     QQC2.ToolButton {
+                        id: deleteButton
+                        readonly property bool armed: sidebar._confirmId === modelData.id
                         Layout.preferredWidth: Kirigami.Units.iconSizes.small
                         Layout.preferredHeight: Kirigami.Units.iconSizes.small
-                        icon.name: "edit-delete"
-                        visible: convHoverHandler.hovered || modelData.id === sidebar.currentId
-                        onClicked: sidebar.deleteRequested(modelData.id)
+                        icon.name: armed ? "dialog-warning" : "edit-delete"
+                        icon.color: armed ? Kirigami.Theme.negativeTextColor : Kirigami.Theme.textColor
+                        visible: convHoverHandler.hovered || modelData.id === sidebar.currentId || armed
+                        onClicked: {
+                            if (armed) {
+                                sidebar._confirmId = ""
+                                sidebar.deleteRequested(modelData.id)
+                            } else {
+                                sidebar._confirmId = modelData.id
+                            }
+                        }
+                        QQC2.ToolTip.text: armed ? "Wirklich löschen?" : "Konversation löschen"
+                        QQC2.ToolTip.visible: hovered
                     }
                 }
 
-                HoverHandler { id: convHoverHandler }
+                HoverHandler {
+                    id: convHoverHandler
+                    onHoveredChanged: {
+                        if (!hovered && sidebar._confirmId === modelData.id) {
+                            sidebar._confirmId = ""
+                        }
+                    }
+                }
 
                 MouseArea {
                     anchors.fill: parent
                     z: -1
-                    onClicked: sidebar.loadRequested(modelData.id)
+                    onClicked: {
+                        sidebar._confirmId = ""
+                        sidebar.loadRequested(modelData.id)
+                    }
                 }
             }
         }

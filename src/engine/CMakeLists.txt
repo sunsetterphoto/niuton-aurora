@@ -91,4 +91,6 @@ if(BUILD_TESTING)
         "AURORA_DB_PATH=${CMAKE_BINARY_DIR}/tst_auroracontroller.db")
     aurora_engine_qmltest(tst_commands)
     aurora_engine_qmltest(tst_conversationexport)
+    aurora_engine_qmltest(tst_comfyclient
+        "XDG_DATA_HOME=${CMAKE_BINARY_DIR}/tst_comfyclient_data")
 endif()

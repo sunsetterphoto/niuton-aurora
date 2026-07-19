@@ -111,6 +111,16 @@ Item {
             compare(controller.attachedFileUrl, "")
             compare(controller.attachedFileName, "")
         }
+
+        // Einziger Anhangs-Setzpunkt (Dateidialog UND Drag&Drop aus ChatView).
+        function test_attachFile_setztUrlUndName() {
+            controller.attachFile("file:///tmp/bericht final.pdf")
+            compare(controller.attachedFileUrl, "file:///tmp/bericht final.pdf")
+            compare(controller.attachedFileName, "bericht final.pdf")
+            controller.clearAttachment()
+            compare(controller.attachedFileUrl, "")
+            compare(controller.attachedFileName, "")
+        }
         function test_command_export_inListe() {
             var hasExport = false
             for (var i = 0; i < controller.commandList.length; i++)

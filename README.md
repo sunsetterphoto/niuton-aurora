@@ -20,6 +20,8 @@ processing.
   permissions (auto / confirm).
 - **Markdown rendering with syntax-highlighted code blocks** (Kate engine via
   `org.kde.syntaxhighlighting`, follows the light/dark color scheme).
+- **File attachments** via file dialog or drag & drop onto the chat — images go to
+  vision-capable models, text files are inlined into the message.
 - **Image generation** via [ComfyUI](https://github.com/comfyanonymous/ComfyUI) (semantic workflow
   templates), from a chat tool or a dedicated image panel.
 - **Voice**: speech-to-text via whisper.cpp and text-to-speech via [Piper](https://github.com/rhasspy/piper).

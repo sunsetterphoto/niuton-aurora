@@ -154,6 +154,7 @@ ColumnLayout {
                 onSearchRequested: function(text) { root.controller.searchAndSend(text) }
                 onAttachRequested: root.controller.openAttachment()
                 onClearAttachment: root.controller.clearAttachment()
+                onFileDropped: function(url) { root.controller.attachFile(url) }
                 onAbortRequested: root.controller.stop()
                 onVoiceToggled: root.controller.toggleVoice()
                 onImageModeRequested: root.controller.setImageMode(true)

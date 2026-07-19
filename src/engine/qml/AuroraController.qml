@@ -215,11 +215,7 @@ QtObject {
     property QtObject _fileDialog: Dialogs.FileDialog {
         id: fileDialog
         title: "Datei anhängen"
-        onAccepted: {
-            controller.attachedFileUrl = selectedFile
-            var path = selectedFile.toString()
-            controller.attachedFileName = path.substring(path.lastIndexOf("/") + 1)
-        }
+        onAccepted: controller.attachFile(selectedFile)
     }
 
     // ==================== Lifecycle-Methoden ====================
@@ -469,6 +465,12 @@ QtObject {
     }
     function setImageMode(on) { imageMode = on }
     function openAttachment() { fileDialog.open() }
+    // Einziger Setz-Punkt für den Anhang: Dateidialog UND Drag&Drop (ChatView).
+    function attachFile(url) {
+        attachedFileUrl = url
+        var path = url.toString()
+        attachedFileName = path.substring(path.lastIndexOf("/") + 1)
+    }
     function clearAttachment() { attachedFileUrl = ""; attachedFileName = "" }
     function generateImage(params) {
         // Manuelle Busy-Ablehnung hier direkt melden (nicht über comfyClient.failed),

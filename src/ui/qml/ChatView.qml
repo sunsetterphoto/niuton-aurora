@@ -4,7 +4,10 @@ import QtQuick.Controls as QQC2
 import org.kde.kirigami as Kirigami
 import net.niuton.aurora.ui
 
-ColumnLayout {
+// Root-Wrapper: ColumnLayout-Inhalt + flächendeckende DropArea (Drag&Drop-
+// Anhänge). Die DropArea ist KEIN Layout-Kind — sie liegt über der ganzen
+// Fläche, nimmt nur Drag&Drop-Events entgegen (Maus geht durch).
+Item {
     id: chatViewRoot
 
     // ---------- Eingänge (Host -> ChatView) ----------
@@ -35,11 +38,14 @@ ColumnLayout {
     signal speakRequested(string text)
     signal rateRequested(string msgId, int rating)
     signal ragSourceRemoveRequested(string rowMsgId, string source, string id)
+    signal fileDropped(var url)
     signal confirmOnceRequested()
     signal confirmForConversationRequested()
     signal rejectRequested()
 
-    spacing: Kirigami.Units.smallSpacing
+    ColumnLayout {
+        anchors.fill: parent
+        spacing: Kirigami.Units.smallSpacing
 
     // ---------- Öffentliche Methode (Host -> Kind, imperativ) ----------
     // Transkript aus dem VoiceRecorder ins Eingabefeld übernehmen
@@ -264,5 +270,40 @@ ColumnLayout {
         onAttachRequested: chatViewRoot.attachRequested()
         onSearchRequested: function(text) { chatViewRoot.searchRequested(text) }
         onAbortRequested: chatViewRoot.abortRequested()
+    }
+    }   // ColumnLayout
+
+    // ---------- Drag & Drop-Anhang ----------
+    // Flächendeckende DropZone über dem Chat (Overlay im Root-Wrapper): eine
+    // abgelegte Datei wird zum Anhang — gleicher Pfad wie der Dateidialog.
+    // Kein Layout-Kind, Maus-Events gehen durch; nur Drag&Drop landet hier.
+    DropArea {
+        anchors.fill: parent
+        onEntered: function(drag) {
+            if (drag.hasUrls) drag.accept(Qt.CopyAction)
+            else drag.accepted = false
+        }
+        onDropped: function(drop) {
+            // Eine Datei genügt (der Anhangs-Pfad ist single-file)
+            if (drop.hasUrls && drop.urls.length > 0) {
+                chatViewRoot.fileDropped(drop.urls[0])
+                drop.accept(Qt.CopyAction)
+            }
+        }
+
+        Rectangle {
+            anchors.fill: parent
+            visible: parent.containsDrag
+            color: Theme.withAlpha(Kirigami.Theme.highlightColor, 0.12)
+            border.color: Kirigami.Theme.highlightColor
+            border.width: 2
+            radius: Kirigami.Units.smallSpacing
+
+            QQC2.Label {
+                anchors.centerIn: parent
+                text: "Datei hier ablegen"
+                color: Kirigami.Theme.highlightColor
+            }
+        }
     }
 }

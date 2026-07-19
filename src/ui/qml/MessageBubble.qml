@@ -2,6 +2,7 @@ import QtQuick
 import QtQuick.Layouts
 import QtQuick.Controls as QQC2
 import org.kde.kirigami as Kirigami
+import org.kde.syntaxhighlighting
 import net.niuton.aurora.ui
 
 Item {
@@ -136,6 +137,40 @@ Item {
         if (parts.length === 0)
             parts.push({ "isCode": false, "content": "", "lang": "" })
         return parts
+    }
+
+    // Fence-Sprache -> KSyntaxHighlighting-Definitionsname. Aliase für die üblichen
+    // Kurzformen; unbekannte saubere Tokens werden roh durchgereicht (die Engine
+    // versucht es, Miss = plain), alles andere -> "" (kein Highlighting).
+    function _definitionFor(lang) {
+        var l = String(lang || "").toLowerCase()
+        if (l === "") return ""
+        var map = {
+            "cpp": "C++", "c++": "C++", "cc": "C++", "cxx": "C++",
+            "c": "C",
+            "python": "Python", "py": "Python",
+            "js": "JavaScript", "javascript": "JavaScript",
+            "ts": "TypeScript", "typescript": "TypeScript",
+            "bash": "Bash", "sh": "Bash", "shell": "Bash", "zsh": "Bash",
+            "qml": "QML",
+            "json": "JSON", "xml": "XML", "html": "HTML", "css": "CSS",
+            "yaml": "YAML", "yml": "YAML",
+            "sql": "SQL",
+            "rust": "Rust", "rs": "Rust",
+            "go": "Go",
+            "java": "Java",
+            "kotlin": "Kotlin", "kt": "Kotlin",
+            "md": "Markdown", "markdown": "Markdown",
+            "ini": "INI", "diff": "Diff", "cmake": "CMake",
+            "lua": "Lua", "php": "PHP",
+            "ruby": "Ruby", "rb": "Ruby",
+            "perl": "Perl",
+            "ps1": "PowerShell", "powershell": "PowerShell",
+            "cs": "C#", "csharp": "C#",
+            "swift": "Swift"
+        }
+        if (map[l] !== undefined) return map[l]
+        return /^[a-zA-Z0-9+#-]+$/.test(l) ? l : ""
     }
 
     Column {
@@ -321,13 +356,27 @@ Item {
                                     }
                                 }
 
-                                QQC2.Label {
+                                // Read-only TextEdit + KSyntaxHighlighter (Kate-Engine):
+                                // echtes Syntax-Highlighting passend zum Farbschema; als
+                                // Nebengewinn ist Code jetzt auch teil-markierbar.
+                                TextEdit {
+                                    id: codeEdit
                                     width: parent.width
                                     text: segment.modelData.isCode ? segment.modelData.content : ""
+                                    readOnly: true
+                                    selectByMouse: true
                                     wrapMode: Text.WrapAnywhere
-                                    textFormat: Text.PlainText
                                     font.family: "monospace"
                                     font.pointSize: Kirigami.Theme.smallFont.pointSize
+                                    color: Kirigami.Theme.textColor
+                                    selectionColor: Kirigami.Theme.highlightColor
+                                    selectedTextColor: Kirigami.Theme.highlightedTextColor
+
+                                    SyntaxHighlighter {
+                                        textEdit: codeEdit
+                                        definition: bubble._definitionFor(segment.modelData.lang)
+                                        theme: Kirigami.Theme.darkMode ? "Breeze Dark" : "Breeze Light"
+                                    }
                                 }
                             }
                         }

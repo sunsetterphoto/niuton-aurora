@@ -18,6 +18,8 @@ processing.
 - **Streaming chat** with separate "thinking" output and **tool calling**: web search, read file,
   list directory, fetch URL, run command (with confirmation), and image generation. Per-tool
   permissions (auto / confirm).
+- **Markdown rendering with syntax-highlighted code blocks** (Kate engine via
+  `org.kde.syntaxhighlighting`, follows the light/dark color scheme).
 - **Image generation** via [ComfyUI](https://github.com/comfyanonymous/ComfyUI) (semantic workflow
   templates), from a chat tool or a dedicated image panel.
 - **Voice**: speech-to-text via whisper.cpp and text-to-speech via [Piper](https://github.com/rhasspy/piper).

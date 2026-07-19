@@ -6,6 +6,8 @@
 #include <QTemporaryDir>
 #include <QtTest>
 
+#include <limits>
+
 #include "conversationstore.h"
 
 // Jeder Test bekommt eine frische DB über AURORA_DB_PATH (Global Constraint:
@@ -607,6 +609,212 @@ private Q_SLOTS:
         f.store->addKnowledge({{"id", f.store->newUuid()}, {"kind", "sonstiges"}, {"title", "x"}});
         QTRY_COMPARE(failed.count(), 1);   // CHECK (kind IN link/note/fact)
         QCOMPARE(failed.first().at(0).toString(), QString("addKnowledge"));
+    }
+
+    // Scheibe C: vereint bewertete Antworten (strikt rating=1) + knowledge-Eintraege;
+    // filtert Orphan-Vektor (rating=0 mit Vektor), embed_model-Mismatch und Treffer
+    // unter der Schwelle; sortiert absteigend; topK-Cap.
+    void searchSimilar_vereintQuellen_filtertUndSortiert()
+    {
+        StoreFixture f;
+        QVERIFY(f.store->open().value("ok").toBool());
+        QSignalSpy done(f.store, &ConversationStore::writeCompleted);
+        const QString cid = f.store->newUuid();
+        const QString aid = f.store->newUuid();    // bewertete Antwort (Treffer)
+        const QString oid = f.store->newUuid();    // Orphan: Vektor, aber rating=0
+        const QString fmid = f.store->newUuid();   // bewertet, aber anderes embed_model
+        f.store->appendMessage({{"conversationId", cid}, {"role", "user"}, {"content", "Wie boote ich ins BIOS?"}});
+        f.store->appendMessage({{"id", aid}, {"conversationId", cid}, {"role", "assistant"}, {"content", "F2 beim Start druecken."}});
+        f.store->appendMessage({{"id", oid}, {"conversationId", cid}, {"role", "assistant"}, {"content", "verwaist"}});
+        f.store->appendMessage({{"id", fmid}, {"conversationId", cid}, {"role", "assistant"}, {"content", "fremdes Modell"}});
+        f.store->updateMessage(aid, {{"rating", 1}});
+        f.store->updateMessage(fmid, {{"rating", 1}});
+        f.store->setEmbedding(aid, QVariantList{1.0, 0.0, 0.0}, QStringLiteral("nomic-embed-text"));
+        f.store->setEmbedding(oid, QVariantList{1.0, 0.0, 0.0}, QStringLiteral("nomic-embed-text"));
+        f.store->setEmbedding(fmid, QVariantList{1.0, 0.0, 0.0}, QStringLiteral("anderes-modell"));
+        const QString kid = f.store->newUuid();
+        f.store->addKnowledge({{"id", kid}, {"kind", "fact"}, {"title", "BIOS-Taste"},
+                               {"url", ""}, {"content", "F2 oder Entf beim POST"}});
+        f.store->setKnowledgeEmbedding(kid, QVariantList{0.9, 0.1, 0.0}, QStringLiteral("nomic-embed-text"));
+        const QString kid2 = f.store->newUuid();
+        f.store->addKnowledge({{"id", kid2}, {"kind", "note"}, {"title", "unpassend"}, {"content", "orthogonal"}});
+        f.store->setKnowledgeEmbedding(kid2, QVariantList{0.0, 1.0, 0.0}, QStringLiteral("nomic-embed-text"));
+        QTRY_COMPARE(done.count(), 13);
+        // 👎 mit Vektor (rating=-1) darf ebenfalls nicht treffen — wie der Orphan
+        const QString nid = f.store->newUuid();
+        f.store->appendMessage({{"id", nid}, {"conversationId", cid}, {"role", "assistant"}, {"content", "schlecht"}});
+        f.store->updateMessage(nid, {{"rating", -1}});
+        f.store->setEmbedding(nid, QVariantList{1.0, 0.0, 0.0}, QStringLiteral("nomic-embed-text"));
+        QTRY_COMPARE(done.count(), 16);
+
+        const QVariantList hits = f.store->searchSimilar(QVariantList{1.0, 0.0, 0.0},
+            QStringLiteral("nomic-embed-text"), 3, 0.75);
+        QCOMPARE(hits.size(), 2);   // aid + kid; oid/fmid/kid2/nid ausgeschlossen
+        const QVariantMap h0 = hits.at(0).toMap();
+        QCOMPARE(h0.value("source").toString(), QString("rated"));
+        QCOMPARE(h0.value("id").toString(), aid);
+        QVERIFY(h0.value("score").toDouble() > 0.99);
+        QCOMPARE(h0.value("question").toString(), QString("Wie boote ich ins BIOS?"));
+        QCOMPARE(h0.value("answer").toString(), QString("F2 beim Start druecken."));
+        const QVariantMap h1 = hits.at(1).toMap();
+        QCOMPARE(h1.value("source").toString(), QString("knowledge"));
+        QCOMPARE(h1.value("id").toString(), kid);
+        QCOMPARE(h1.value("kind").toString(), QString("fact"));
+        QCOMPARE(h1.value("title").toString(), QString("BIOS-Taste"));
+        QVERIFY(h1.value("score").toDouble() > 0.98);
+        QVERIFY(h1.value("score").toDouble() < h0.value("score").toDouble());
+
+        // topK-Cap: nur der beste Treffer
+        QCOMPARE(f.store->searchSimilar(QVariantList{1.0, 0.0, 0.0},
+            QStringLiteral("nomic-embed-text"), 1, 0.75).size(), 1);
+        // sehr hohe Schwelle: nur die identische Antwort (1.0), nicht der Eintrag (~0.994)
+        const QVariantList strict = f.store->searchSimilar(QVariantList{1.0, 0.0, 0.0},
+            QStringLiteral("nomic-embed-text"), 3, 0.9999);
+        QCOMPARE(strict.size(), 1);
+        QCOMPARE(strict.first().toMap().value("id").toString(), aid);
+    }
+
+    void searchSimilar_randfaelle()
+    {
+        StoreFixture f;
+        // vor open(): leer, kein Absturz
+        QCOMPARE(f.store->searchSimilar(QVariantList{1.0}, QStringLiteral("m"), 3, 0.5).size(), 0);
+        QVERIFY(f.store->open().value("ok").toBool());
+        // leerer Query-Vektor und Nullnorm-Query liefern leer
+        QCOMPARE(f.store->searchSimilar(QVariantList{}, QStringLiteral("m"), 3, 0.5).size(), 0);
+        QCOMPARE(f.store->searchSimilar(QVariantList{0.0, 0.0, 0.0}, QStringLiteral("m"), 3, 0.5).size(), 0);
+
+        QSignalSpy done(f.store, &ConversationStore::writeCompleted);
+        const QString kid = f.store->newUuid();
+        f.store->addKnowledge({{"id", kid}, {"kind", "note"}, {"title", "t"}, {"content", "c"}});
+        f.store->setKnowledgeEmbedding(kid, QVariantList{1.0, 0.0, 0.0}, QStringLiteral("m"));
+        QTRY_COMPARE(done.count(), 2);
+
+        // Dimensions-Mismatch (2-dim Query vs. 3-dim Kandidat) -> uebersprungen
+        QCOMPARE(f.store->searchSimilar(QVariantList{1.0, 0.0}, QStringLiteral("m"), 3, 0.5).size(), 0);
+        // passende Dimension trifft
+        QCOMPARE(f.store->searchSimilar(QVariantList{1.0, 0.0, 0.0}, QStringLiteral("m"), 3, 0.5).size(), 1);
+        // topK=0 -> leer; topK>20 -> geclamped (kein Fehler, der eine Kandidat kommt)
+        QCOMPARE(f.store->searchSimilar(QVariantList{1.0, 0.0, 0.0}, QStringLiteral("m"), 0, 0.5).size(), 0);
+        QCOMPARE(f.store->searchSimilar(QVariantList{1.0, 0.0, 0.0}, QStringLiteral("m"), 100, 0.5).size(), 1);
+        // NaN/negative Schwelle -> wie 0.0 (Treffer bleibt), nicht „alles" oder „nichts"
+        QCOMPARE(f.store->searchSimilar(QVariantList{1.0, 0.0, 0.0}, QStringLiteral("m"), 3, -5.0).size(), 1);
+        // NaN im Query-Vektor -> leer (kein NaN-Trefferhagel)
+        QCOMPARE(f.store->searchSimilar(QVariantList{1.0, 0.0, std::numeric_limits<double>::quiet_NaN()},
+            QStringLiteral("m"), 3, 0.5).size(), 0);
+    }
+
+    // Haertungswelle Fund 1: jede id-adressierte UPDATE/DELETE-Op auf eine
+    // nicht existierende id muss writeFailed melden (bisher: 0 Zeilen
+    // betroffen, aber writeCompleted — stiller No-op als "Erfolg").
+    void updateDeleteOps_unbekannteId_meldenWriteFailed()
+    {
+        StoreFixture f;
+        QVERIFY(f.store->open().value("ok").toBool());
+        QSignalSpy done(f.store, &ConversationStore::writeCompleted);
+        QSignalSpy failed(f.store, &ConversationStore::writeFailed);
+        const QString cid = f.store->newUuid();
+        const QString mid = f.store->newUuid();
+        f.store->appendMessage({{"conversationId", cid}, {"id", mid},
+                                {"role", "assistant"}, {"content", "x"}});
+        const QString kid = f.store->newUuid();
+        f.store->addKnowledge({{"id", kid}, {"kind", "note"}, {"title", "t"}, {"content", "c"}});
+        QTRY_COMPARE(done.count(), 2);
+
+        f.store->updateMessage("gibt-es-nicht", {{"content", "y"}});
+        f.store->setEmbedding("gibt-es-nicht", QVariantList{1.0}, QStringLiteral("m"));
+        f.store->deleteMessage("gibt-es-nicht");
+        f.store->updateConversation("gibt-es-nicht", {{"extra", QVariantMap{{"a", 1}}}});
+        f.store->updateToolCall("gibt-es-nicht", {{"status", "ok"}});
+        f.store->updateKnowledge("gibt-es-nicht", {{"title", "z"}});
+        f.store->setKnowledgeEmbedding("gibt-es-nicht", QVariantList{1.0}, QStringLiteral("m"));
+        f.store->deleteKnowledge("gibt-es-nicht");
+        QTRY_COMPARE(failed.count(), 8);
+        QCOMPARE(done.count(), 2);   // kein falscher Erfolg dazwischen
+
+        QStringList ops;
+        for (const auto &sig : failed)
+            ops << sig.at(0).toString();
+        QVERIFY(ops.contains("updateMessage"));
+        QVERIFY(ops.contains("setEmbedding"));
+        QVERIFY(ops.contains("deleteMessage"));
+        QVERIFY(ops.contains("updateConversation"));
+        QVERIFY(ops.contains("updateToolCall"));
+        QVERIFY(ops.contains("updateKnowledge"));
+        QVERIFY(ops.contains("setKnowledgeEmbedding"));
+        QVERIFY(ops.contains("deleteKnowledge"));
+        // verstaendliche Meldung statt leerem SQL-Fehlertext
+        QVERIFY(!failed.first().at(1).toString().isEmpty());
+    }
+
+    // Fund 1, Bind-Seite: eine null-QString-id wurde als SQL-NULL gebunden ->
+    // WHERE id = NULL trifft SQL-seitig NIE eine Zeile -> stiller No-op bei
+    // gemeldetem Erfolg. textOrEmpty + 0-Zeilen-Check machen daraus writeFailed.
+    void updateDeleteOps_nullId_meldenWriteFailed()
+    {
+        StoreFixture f;
+        QVERIFY(f.store->open().value("ok").toBool());
+        QSignalSpy done(f.store, &ConversationStore::writeCompleted);
+        QSignalSpy failed(f.store, &ConversationStore::writeFailed);
+        f.store->updateMessage(QString(), {{"content", "y"}});
+        f.store->deleteMessage(QString());
+        f.store->setEmbedding(QString(), QVariantList{1.0}, QStringLiteral("m"));
+        f.store->updateToolCall(QString(), {{"status", "ok"}});
+        f.store->updateKnowledge(QString(), {{"title", "z"}});
+        f.store->setKnowledgeEmbedding(QString(), QVariantList{1.0}, QStringLiteral("m"));
+        f.store->deleteKnowledge(QString());
+        QTRY_COMPARE(failed.count(), 7);
+        QCOMPARE(done.count(), 0);
+    }
+
+    // Fund 1, Gegenprobe: die bewusst toleranten Ops duerfen NICHT härten —
+    // touchConversation auf eine unbekannte id bleibt ein erfolgreicher No-op.
+    void touchConversation_unbekannteId_bleibtTolerant()
+    {
+        StoreFixture f;
+        QVERIFY(f.store->open().value("ok").toBool());
+        QSignalSpy done(f.store, &ConversationStore::writeCompleted);
+        QSignalSpy failed(f.store, &ConversationStore::writeFailed);
+        f.store->touchConversation("gibt-es-nicht", QStringLiteral("Titel"));
+        QTRY_COMPARE(done.count(), 1);
+        QCOMPARE(failed.count(), 0);
+    }
+
+    // Haertungswelle Fund 2: SQL-Fehler in den synchronen Reads muessen als
+    // readFailed sichtbar werden statt als stille leere Ergebnisse (corrupt/
+    // locked DB war von "keine Daten" nicht unterscheidbar).
+    void reads_beiFehlendemSchema_meldenReadFailed_stattStillerLeere()
+    {
+        StoreFixture f;
+        QVERIFY(f.store->open().value("ok").toBool());
+        // Tabellen unter der Lese-Verbindung wegnehmen -> jede Lese-Query scheitert
+        {
+            QSqlDatabase db = QSqlDatabase::addDatabase("QSQLITE", "sabotage");
+            db.setDatabaseName(f.store->dbPath());
+            QVERIFY(db.open());
+            QSqlQuery q(db);
+            QVERIFY(q.exec("PRAGMA foreign_keys=OFF"));
+            QVERIFY(q.exec("DROP TABLE messages"));
+            QVERIFY(q.exec("DROP TABLE conversations"));
+            QVERIFY(q.exec("DROP TABLE knowledge"));
+            db.close();
+        }
+        QSqlDatabase::removeDatabase("sabotage");
+
+        QSignalSpy failed(f.store, &ConversationStore::readFailed);
+        QCOMPARE(f.store->listConversations().size(), 0);
+        QCOMPARE(f.store->messages("x").size(), 0);
+        QCOMPARE(f.store->conversation("x").isEmpty(), true);
+        QCOMPARE(f.store->goodExamples().size(), 0);
+        QCOMPARE(f.store->knowledgeEntries().size(), 0);
+        QCOMPARE(f.store->questionForAnswer("x"), QString());
+        QCOMPARE(f.store->latestConversationId(), QString());
+        QCOMPARE(f.store->searchSimilar(QVariantList{1.0}, QStringLiteral("m"), 3, 0.5).size(), 0);
+        // Rueckgaben bleiben leer, aber jeder Fehler wird gemeldet:
+        // 7 Reads + searchSimilar 2x (messages- UND knowledge-Query)
+        QCOMPARE(failed.count(), 9);
+        QCOMPARE(failed.first().at(0).toString(), QString("listConversations"));
+        QVERIFY(!failed.first().at(1).toString().isEmpty());
     }
 };
 

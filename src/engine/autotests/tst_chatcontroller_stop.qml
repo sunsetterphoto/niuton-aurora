@@ -25,10 +25,12 @@ Item {
     // damit _systemPrompt() unverändert läuft; readBase64 liest aus `files` (Pfad->b64)
     // — steuert den Reload-Regenerate-Disk-Fallback (Task 10, Fix nach Review).
     QtObject { id: fileioMock; property var files: ({})
+        property var readCounts: ({})           // Pfad -> Anzahl readText-Aufrufe
         function readBase64(path){ return files[path] !== undefined
             ? ({ "ok": true, "data": files[path], "mime": "image/png", "error": "" })
             : ({ "ok": false, "data": "", "mime": "", "error": "nicht gefunden" }) }
-        function readText(path, max){ return ({ "ok": false, "text": "", "error": "" }) }
+        function readText(path, max){ readCounts[path] = (readCounts[path] || 0) + 1
+            return ({ "ok": false, "text": "", "error": "" }) }
         function standardPath(kind){ return "/h/.local/share/aurora" } }
 
     // echte 5b-Logikbausteine injizieren (sonst wirft der guardlose _decide null.decide)
@@ -49,7 +51,7 @@ Item {
                          storeMock.rows=[]; storeMock._n=0; ctl.conversationId="c1"; ctl._messages=[]
                          registryMock.execLog=[]; registryMock.abortCalled=false; registryMock.perm={}
                          realGrants.clearConversation("c1")
-                         fileioMock.files=({})
+                         fileioMock.files=({}); fileioMock.readCounts=({})
                          ctl.state="idle"; ctl._activeJob=null; lastReq=null }
 
         function test_stopDuringStreamPersistsAborted() {
@@ -172,6 +174,49 @@ Item {
             compare(ctl.chatModel.count, 2)
             compare(ctl.chatModel.get(0).isUser, true)
             compare(ctl.chatModel.get(1).text, "Antwort")
+        }
+
+        // Audit-Fix (Klein/ux): persistierte assistant-Zwischenzeilen eines
+        // Tool-Zuges (tool_calls, leerer content) duerfen nach dem Reload NICHT
+        // als leere Ghost-Bubbles erscheinen — bewusste Ausblend-Variante aus dem
+        // Audit (toolActivity-Persistenz bleibt Backlog): weder Bubble noch
+        // _messages-Eintrag. Eine assistant-Zeile MIT mediaPath (Bild) bleibt.
+        function test_loadConversationSkipptLeereAssistantZwischenzeilen() {
+            storeMock.rows = [
+                { id:"r1", role:"user", content:"Frage", status:"final", createdAt:0, thinking:"" },
+                { id:"r2", role:"assistant", content:"", status:"final", createdAt:0, thinking:"" },   // Ghost (tool_calls)
+                { id:"r3", role:"assistant", content:"Antwort", status:"final", createdAt:0, thinking:"" },
+                { id:"r4", role:"assistant", content:"", status:"final", createdAt:0, thinking:"", mediaPath:"/tmp/img.png" }
+            ]
+            ctl.loadConversation("c9")
+            compare(ctl.chatModel.count, 3)                 // user + Antwort + Bild, kein Ghost
+            compare(ctl._messages.length, 3)
+            compare(ctl.chatModel.get(1).text, "Antwort")
+            compare(ctl.chatModel.get(2).mediaPath, "/tmp/img.png")
+            for (var i = 0; i < ctl._messages.length; i++)
+                verify(ctl._messages[i]._msgId !== "r2")    // Ghost auch nicht im Kontext
+        }
+
+        // Audit-Fix (Klein/perf): _systemPrompt() las bisher bei JEDEM
+        // _buildMessages() /etc/hostname, /etc/os-release, /proc/meminfo UND
+        // memory.md synchron auf dem GUI-Thread (5-Runden-Tool-Zug ≈ 24 Reads).
+        // Der statische Teil (hostname/os/ram) aendert sich zur Laufzeit nicht
+        // -> einmalig; memory.md ist nutzer-editierbar -> pro ZUG einmal frisch.
+        function test_systemPromptLiestStatischEinmalUndMemoryProZug() {
+            ctl._sysStatic = null; ctl._memoryCache = null
+            // Zug 1 MIT Tool-Runde: _systemPrompt laeuft 3x (_maybeCompact + 2 Streams)
+            ctl.send("Erste", null)
+            lastJob.done({ content:"", thinking:"", toolCalls:[ call("read_file", { path:"/x" }) ] })
+            lastJob.done({ content:"ok", thinking:"", toolCalls:[] })
+            compare(ctl.state, "idle")
+            compare(fileioMock.readCounts["/etc/hostname"] || 0, 1)
+            compare(fileioMock.readCounts["/h/.local/share/aurora/memory.md"] || 0, 1)
+            // Zug 2: statisch weiter aus dem Cache, memory.md pro Zug frisch
+            ctl.send("Zweite", null)
+            lastJob.done({ content:"ok", thinking:"", toolCalls:[] })
+            compare(ctl.state, "idle")
+            compare(fileioMock.readCounts["/etc/hostname"] || 0, 1)
+            compare(fileioMock.readCounts["/h/.local/share/aurora/memory.md"] || 0, 2)
         }
 
         function test_abortedPartialStaysInContext() {

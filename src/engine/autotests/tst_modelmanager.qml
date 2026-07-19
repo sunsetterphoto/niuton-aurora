@@ -71,6 +71,16 @@ TestCase {
         return { "ok": true, "data": { "models": models } }
     }
 
+    // Preload-Requests zaehlen (keep_alive "10m" unterscheidet sie von
+    // setKeepAlive-"0"/"300s" auf demselben /api/chat-Endpunkt)
+    function _preloadCount() {
+        var n = 0
+        for (var i = 0; i < mockHttp.calls.length; i++)
+            if (mockHttp.calls[i].url.indexOf("/api/chat") !== -1
+                && mockHttp.calls[i].body && mockHttp.calls[i].body.keep_alive === "10m") n++
+        return n
+    }
+
     function test_autoModusLaedtProfilModell() {
         mockFileIO.files["/sys/firmware/acpi/platform_profile"] = "performance\n"
         mgr.refresh()
@@ -86,6 +96,42 @@ TestCase {
         mockHttp.answer(i, { "ok": true })
         compare(mgr.modelLoading, false)
         compare(mgr.modelLoaded, true)
+    }
+
+    // Audit-Fix (Klein/perf): der 30-s-Profil-Timer feuert auch, waehrend ein
+    // Modell noch laedt — fuer DASSELBE Modell darf kein zweiter paralleler
+    // Preload-Request starten.
+    function test_preloadGuardKeinDoppelterPreloadWaehrendLaden() {
+        mgr.refresh()                              // balanced -> gemma4:e4b, Preload in flight
+        compare(mgr.modelLoading, true)
+        compare(_preloadCount(), 1)
+        mgr.checkPowerProfile()                    // Timer-Tick: gleiches Profil, noch ladend
+        mgr.checkPowerProfile()
+        compare(_preloadCount(), 1)                // KEIN paralleler Zweit-Preload
+        compare(mgr.modelLoading, true)
+        mockHttp.answer(mockHttp.find("http://local:11434/api/chat"), { "ok": true })
+        compare(mgr.modelLoading, false)
+        compare(mgr.modelLoaded, true)
+    }
+
+    // Der Guard darf einen echten ModellWECHSEL waehrend des Ladens nicht
+    // blockieren: das neue Modell wird vorgeladen, der stale Callback des alten
+    // verworfen (modelLoading bleibt bis zur Antwort des NEUEN Modells true).
+    function test_preloadWechselWaehrendLadenStartetNeuesModell() {
+        mgr.refresh()                              // e4b-Preload in flight
+        var iAlt = mockHttp.find("http://local:11434/api/chat")
+        verify(iAlt !== -1)
+        mockFileIO.files["/sys/firmware/acpi/platform_profile"] = "performance\n"
+        mgr.checkPowerProfile()                    // Wechsel auf qwen3.5:9b, e4b laedt noch
+        var iNeu = mockHttp.find("http://local:11434/api/chat", iAlt + 1)
+        verify(iNeu !== -1)
+        compare(mockHttp.calls[iNeu].body.model, "qwen3.5:9b")
+        mockHttp.answer(iAlt, { "ok": true })      // stale Antwort des alten Modells
+        compare(mgr.modelLoading, true)            // neuer Preload laeuft noch
+        mockHttp.answer(iNeu, { "ok": true })
+        compare(mgr.modelLoading, false)
+        compare(mgr.modelLoaded, true)
+        compare(mgr.activeModel, "qwen3.5:9b")
     }
 
     function test_fehlendesProfilDeaktiviertAuto() {

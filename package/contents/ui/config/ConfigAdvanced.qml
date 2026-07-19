@@ -76,6 +76,41 @@ KCM.SimpleKCM {
             QQC2.ToolTip.visible: hovered
         }
 
+        QQC2.CheckBox {
+            Kirigami.FormData.label: "Abruf (RAG):"
+            text: "Wissensbasis beim Chatten automatisch einbeziehen"
+            checked: (ConfigStore.revision, ConfigStore.value("ragEnabled"))
+            onToggled: ConfigStore.setValue("ragEnabled", checked)
+            QQC2.ToolTip.text: "Bettet jede Frage ein und speist ähnliche Einträge und bewährte Antworten in den Kontext ein"
+            QQC2.ToolTip.visible: hovered
+        }
+
+        QQC2.TextField {
+            Kirigami.FormData.label: "Max. Treffer:"
+            text: (ConfigStore.revision, String(ConfigStore.value("ragTopK")))
+            validator: IntValidator { bottom: 1; top: 10; localeName: "C" }
+            // NaN-Guard (leeres Feld) + Clamp — kein Config-Müll bei ungültiger Eingabe
+            onEditingFinished: {
+                var v = parseInt(text)
+                if (!isNaN(v)) ConfigStore.setValue("ragTopK", Math.min(10, Math.max(1, v)))
+            }
+            QQC2.ToolTip.text: "Wie viele Wissensbasis-Treffer höchstens in den Kontext kommen (1–10)"
+            QQC2.ToolTip.visible: hovered
+        }
+
+        QQC2.TextField {
+            Kirigami.FormData.label: "Ähnlichkeit ab:"
+            text: (ConfigStore.revision, String(ConfigStore.value("ragThreshold")))
+            validator: DoubleValidator { bottom: 0.0; top: 1.0; localeName: "C" }
+            // deutsches Dezimalkomma normalisieren; NaN-Guard (leeres Feld) + Clamp
+            onEditingFinished: {
+                var v = parseFloat(text.replace(",", "."))
+                if (!isNaN(v)) ConfigStore.setValue("ragThreshold", Math.min(1.0, Math.max(0.0, v)))
+            }
+            QQC2.ToolTip.text: "Mindest-Ähnlichkeit (0–1) für einen Treffer — höher = strenger (Default 0.75)"
+            QQC2.ToolTip.visible: hovered
+        }
+
         QQC2.Label {
             visible: statusMessage !== ""
             text: statusMessage

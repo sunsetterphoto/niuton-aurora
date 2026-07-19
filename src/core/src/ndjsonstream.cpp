@@ -36,6 +36,19 @@ void NdjsonStream::setIdleTimeoutMs(int ms)
     Q_EMIT idleTimeoutMsChanged();
 }
 
+int NdjsonStream::maxLineBytes() const
+{
+    return m_maxLineBytes;
+}
+
+void NdjsonStream::setMaxLineBytes(int bytes)
+{
+    if (bytes == m_maxLineBytes)
+        return;
+    m_maxLineBytes = bytes;
+    Q_EMIT maxLineBytesChanged();
+}
+
 QVariant NdjsonStream::normalizeBody(const QVariant &body)
 {
     if (body.metaType() == QMetaType::fromType<QJSValue>())
@@ -53,6 +66,7 @@ void NdjsonStream::post(const QString &url, const QVariant &body, const QVariant
         req.setRawHeader(it.key().toUtf8(), it.value().toString().toUtf8());
 
     m_timedOut = false;
+    m_lineTooLong = false;
     m_buffer.clear();
     m_reply = m_nam.post(req, QJsonDocument::fromVariant(normalizeBody(body)).toJson(QJsonDocument::Compact));
     connect(m_reply, &QNetworkReply::readyRead, this, &NdjsonStream::onReadyRead);
@@ -77,6 +91,15 @@ void NdjsonStream::onReadyRead()
     m_idleTimer.start(m_idleTimeoutMs); // pro Chunk neu starten
     m_buffer.append(m_reply->readAll());
     drainBuffer(false);
+    if (!m_reply)
+        return; // ein Handler hat abort() gerufen
+    if (m_buffer.size() > m_maxLineBytes) {
+        // Newline-lose Riesenzeile: der Puffer würde bis zum Idle-Timeout
+        // weiterwachsen — Stream wie beim Timeout hart abbrechen; die
+        // angefangene Zeile wird verworfen (onFinished flusht sie nicht).
+        m_lineTooLong = true;
+        m_reply->abort(); // löst onFinished aus -> finished(false, ..., "line too long")
+    }
 }
 
 void NdjsonStream::onFinished()
@@ -84,9 +107,11 @@ void NdjsonStream::onFinished()
     QNetworkReply *reply = m_reply;
     // Nach Timeout-abort() ist das Device bereits geschlossen: readAll() wuerde
     // Qt-intern "device not open" warnen (s. Http::finishJson-Erkenntnis aus Task 2).
-    if (!m_timedOut)
+    // Bei m_lineTooLong gilt dasselbe — und die zu lange Zeile wird ohnehin verworfen.
+    if (!m_timedOut && !m_lineTooLong)
         m_buffer.append(reply->readAll());
-    drainBuffer(true);
+    if (!m_lineTooLong)
+        drainBuffer(true);   // kein Flush: die übergroße Restzeile gehoert verworfen
     if (m_reply != reply)
         return; // ein Handler hat abort() ODER post() gerufen: alter Request ist
                 // verworfen, still bleiben (abort() hat cleanup() + deleteLater()
@@ -98,6 +123,8 @@ void NdjsonStream::onFinished()
     bool ok = false;
     if (m_timedOut)
         error = QStringLiteral("timeout");
+    else if (m_lineTooLong)
+        error = QStringLiteral("line too long");
     else if (status != 0 && (status < 200 || status >= 300))
         // HTTP-Statuscode hat Vorrang vor reply->error(): Qt klassifiziert
         // manche Statuscodes (z. B. 404) selbst als Transportfehler und würde

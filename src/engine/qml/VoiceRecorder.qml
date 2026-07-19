@@ -73,6 +73,10 @@ Item {
         // den echten Hänger benennt statt einer leeren Transkription.
         timeoutMs: 60000
         onFinished: function(code, out, err, trunc, to) {
+            // Verspätetes finished() nach cancelTranscription() verwerfen:
+            // recState steht dann bereits auf "idle" — ohne den Guard meldete
+            // der Abbruch fälschlich "Keine Sprache erkannt".
+            if (recorder.recState !== "transcribing") return
             recorder.recState = "idle"
             if (to) { recorder.errorOccurred("Transkription fehlgeschlagen: Zeitüberschreitung"); return }
             var text = out.trim()
@@ -117,6 +121,22 @@ Item {
     function toggle() {
         if (recState === "idle") start()
         else if (recState === "recording") stop()
+        else if (recState === "transcribing") cancelTranscription()
+    }
+
+    // Manueller Abbruch aus "transcribing": ohne diesen Ausstieg bliebe der
+    // Mikro-Knopf bis zum 60-s-Timeout tot (toggle() kannte den Zustand nicht).
+    // SIGKILL statt SIGTERM: die Transkription hält keinen schützenswerten
+    // Zustand (liest nur das WAV, schreibt nach stdout) und soll sofort sterben,
+    // damit ein zügig folgender Neustart nicht am noch laufenden Runner hängt
+    // (start() auf laufendem ProcessRunner ist ein No-op). Das verspätete
+    // finished() des abgebrochenen Prozesses verwirft der recState-Guard im
+    // Handler (recState steht dann schon auf "idle").
+    function cancelTranscription() {
+        if (recState !== "transcribing") return
+        recState = "idle"
+        if (transcribeProc.running) transcribeProc.kill()
+        errorOccurred("Transkription abgebrochen")
     }
 
     function start() {

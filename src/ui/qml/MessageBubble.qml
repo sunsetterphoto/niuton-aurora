@@ -19,6 +19,7 @@ Item {
     required property string toolActivity
     required property string msgId
     required property int rating
+    required property string ragSources
 
     // Bound explicitly from parent
     property bool showThinking: false
@@ -28,6 +29,7 @@ Item {
     signal regenerateRequested()
     signal speakRequested(string text)
     signal rateRequested(string msgId, int rating)
+    signal ragSourceRemoveRequested(string rowMsgId, string source, string id)
 
     readonly property real maxBubbleWidth: width * 0.85
     readonly property real pad: Kirigami.Units.largeSpacing
@@ -43,6 +45,12 @@ Item {
     readonly property var _activity: {
         if (isUser || !toolActivity) return []
         try { return JSON.parse(toolActivity) } catch (e) { return [] }
+    }
+
+    // Attribution (Scheibe C): genutzte Wissensbasis-Quellen dieser Antwort.
+    readonly property var _rag: {
+        if (isUser || !ragSources) return []
+        try { return JSON.parse(ragSources) } catch (e) { return [] }
     }
 
     implicitHeight: wrapper.height + Kirigami.Units.smallSpacing * 2
@@ -415,6 +423,76 @@ Item {
             font.pointSize: Kirigami.Theme.smallFont.pointSize
             font.italic: true
             opacity: 0.5
+        }
+
+        // ---------- Attribution: genutzte Wissensbasis-Quellen (Scheibe C) ----------
+        // Dezente Zeile unter der Bubble; ✕ entfernt die Quelle aus der Wissensbasis
+        // (hover-sichtbar, Konvention wie KnowledgeView/MessageBubble-Aktionszeile).
+        Row {
+            id: ragRow
+            visible: !bubble.isUser && !bubble.streaming && bubble._rag.length > 0
+            width: parent.width
+            spacing: Kirigami.Units.smallSpacing
+
+            QQC2.Label {
+                anchors.verticalCenter: parent.verticalCenter
+                text: "Wissensbasis:"
+                font.pointSize: Kirigami.Theme.smallFont.pointSize
+                opacity: 0.5
+            }
+
+            Flow {
+                width: parent.width - x
+                spacing: Kirigami.Units.smallSpacing
+
+                Repeater {
+                    model: bubble._rag
+                    delegate: Rectangle {
+                        id: ragChip
+                        required property var modelData
+                        height: ragChipRow.height + Kirigami.Units.smallSpacing
+                        width: ragChipRow.width + Kirigami.Units.smallSpacing * 2
+                        radius: Kirigami.Units.smallSpacing
+                        color: Theme.withAlpha(Kirigami.Theme.textColor, 0.04)
+                        border.width: 1
+                        border.color: Theme.withAlpha(Kirigami.Theme.textColor, 0.10)
+
+                        HoverHandler { id: ragChipHover }
+
+                        Row {
+                            id: ragChipRow
+                            x: Kirigami.Units.smallSpacing
+                            anchors.verticalCenter: parent.verticalCenter
+                            spacing: Kirigami.Units.smallSpacing
+
+                            QQC2.Label {
+                                anchors.verticalCenter: parent.verticalCenter
+                                text: ragChip.modelData.label + " · " + Math.round((ragChip.modelData.score || 0) * 100) + "%"
+                                // PlainText zwingend: das Label enthält KB-/Chat-Inhalt;
+                                // AutoText würde Markup (<img> etc.) als Rich Text
+                                // interpretieren und Remote-URLs nachladen (IP-Leak —
+                                // dasselbe Bedrohungsmodell wie _neutralizeImages).
+                                textFormat: Text.PlainText
+                                font.pointSize: Kirigami.Theme.smallFont.pointSize
+                                opacity: 0.7
+                            }
+                            QQC2.ToolButton {
+                                anchors.verticalCenter: parent.verticalCenter
+                                icon.name: "edit-delete"
+                                icon.width: Kirigami.Units.iconSizes.small
+                                icon.height: Kirigami.Units.iconSizes.small
+                                padding: 0
+                                display: QQC2.AbstractButton.IconOnly
+                                opacity: ragChipHover.hovered ? 1.0 : 0.0
+                                enabled: opacity > 0
+                                Behavior on opacity { NumberAnimation { duration: 120 } }
+                                onClicked: bubble.ragSourceRemoveRequested(bubble.msgId, ragChip.modelData.source, ragChip.modelData.id)
+                                QQC2.ToolTip { text: "Aus der Wissensbasis entfernen"; visible: parent.hovered; delay: Kirigami.Units.toolTipDelay }
+                            }
+                        }
+                    }
+                }
+            }
         }
 
         // ---------- Aktionszeile (letzte Bubble dauerhaft, sonst bei Hover) ----------

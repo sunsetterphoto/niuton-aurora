@@ -62,6 +62,47 @@ private Q_SLOTS:
         QCOMPARE(r.value("mime").toString(), QStringLiteral("text/plain"));
     }
 
+    // Haertungswelle Fund 5: das Limit muss NACH dem open via read(limit+1)
+    // greifen (wie readText) — st_size luegt bei Pseudo-Dateien (size()==0
+    // bei /proc). Vor dem Fix unterlief eine solche Datei das Limit.
+    void readBase64_limitGreiftAuchBeiPseudoDatei()
+    {
+        FileIO io;
+        // /proc/self/status: QFileInfo::size() == 0, Inhalt aber >> 10 Bytes
+        const QVariantMap r = io.readBase64(QStringLiteral("/proc/self/status"), 10);
+        QCOMPARE(r.value("ok").toBool(), false);
+        QVERIFY(r.value("error").toString().contains(QStringLiteral("groß")));
+    }
+
+    void readBase64_procDatei_bleibtLesbar()
+    {
+        // Gegenprobe: Pseudo-Dateien mit Inhalt unter dem Limit muessen
+        // weiterhin funktionieren (st_size==0 darf nichts kaputt machen).
+        FileIO io;
+        const QVariantMap r = io.readBase64(QStringLiteral("/proc/self/status"), 65536);
+        QCOMPARE(r.value("ok").toBool(), true);
+        QVERIFY(QByteArray::fromBase64(r.value("data").toString().toLatin1())
+                    .contains("Name:"));
+    }
+
+    void readBase64_zuGrosseDatei_ueber20MiB_wirdAbgelehnt()
+    {
+        // Sparse-Datei > 20 MiB (Default-Limit): 1 Byte am Ende geschrieben,
+        // Rest sind Loch — kein nennenswerter Plattenverbrauch im Test.
+        QTemporaryDir tmp;
+        const QString path = tmp.path() + QStringLiteral("/riesig.bin");
+        QFile f(path);
+        QVERIFY(f.open(QIODevice::WriteOnly));
+        QVERIFY(f.seek(21LL * 1024 * 1024));
+        QCOMPARE(f.write("x"), 1);
+        f.close();
+        QCOMPARE(QFileInfo(path).size(), 21LL * 1024 * 1024 + 1);
+        FileIO io;
+        const QVariantMap r = io.readBase64(path);   // Default 20 MiB
+        QCOMPARE(r.value("ok").toBool(), false);
+        QVERIFY(r.value("error").toString().contains(QStringLiteral("groß")));
+    }
+
     void listDir_liefert_eintraege()
     {
         QTemporaryDir tmp;

@@ -194,6 +194,13 @@ QtObject {
         function onWriteFailed(op, error) {
             console.warn("Aurora: DB-Schreibfehler", op, error)
         }
+        function onReadFailed(op, error) {
+            console.warn("Aurora: DB-Lesefehler", op, error)
+            // Sichtbar statt stiller Leere (Audit): korrupte/gesperrte DB wirkt
+            // sonst wie „keine Daten" — der Nutzer glaubt an Datenverlust.
+            controller._transientStatus = "Datenbank-Lesefehler (" + op + ")"
+            voiceStatusTimer.restart()
+        }
     }
 
     // Auto-Vorlesen: eine fertige Assistenten-Antwort bei aktivem Toggle vorlesen.
@@ -362,7 +369,15 @@ QtObject {
     }
 
     function regenerate() { engine.regenerate() }
-    function stop() { engine.stop() }
+    function stop() {
+        // Verworfene TOOL-Generierung mit abbrechen: ohne cancel() liefe das
+        // Polling weiter und der Download schriebe ein Orphan-Bild nach
+        // images/ — der originConvId-Guard in onFinished verwirft das
+        // Ergebnis erst NACH dem Speichern. Der MANUELLE ImagePanel-Weg
+        // bleibt bewusst unberührt (der Nutzer wartet dort auf sein Bild).
+        if (comfyClient.busy && comfyClient.toolInitiated) comfyClient.cancel()
+        engine.stop()
+    }
 
     // ==================== Konversations-Methoden ====================
     function newConversation() { engine.newConversation(); refreshConversationList() }
@@ -388,6 +403,14 @@ QtObject {
     function addManualEntry(kind, title, url, content) { engine.addKnowledge(kind, title, url, content) }
     function updateManualEntry(id, kind, title, url, content) { engine.updateKnowledge(id, kind, title, url, content) }
     function removeManualEntry(id) { engine.removeKnowledge(id) }
+    // Entfernen am Ort (Attribution an der Bubble, Scheibe C): die Quelle aus der
+    // Wissensbasis nehmen — rated = Rating-Reset (der Hook löscht den Vektor),
+    // knowledge = Eintrag löschen — und die sichtbare Attribution sofort strippen.
+    function removeRagSource(rowMsgId, source, id) {
+        if (source === "rated") removeGoodExample(id)
+        else removeManualEntry(id)
+        engine.stripRagSource(rowMsgId, id)
+    }
 
     // ==================== Modell / Tool-Freigabe ====================
     function selectModel(value) { modelManager.selectModel(value) }

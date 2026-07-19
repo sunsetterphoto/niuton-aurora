@@ -64,6 +64,14 @@ Rectangle {
         return String(title || "").trim() !== "" || String(content || "").trim() !== ""
     }
 
+    // Sicherheit: Qt.openUrlExternally nimmt JEDES Schema (file://, custom://).
+    // Nutzer-eingetragene URLs nur mit harmlosen Schemata an den OS-Handler
+    // (gleiches Muster wie MessageBubble._isSafeLink, bewusst lokal gehalten).
+    function _isSafeLink(link) {
+        var l = String(link || "").toLowerCase()
+        return l.indexOf("http://") === 0 || l.indexOf("https://") === 0 || l.indexOf("mailto:") === 0
+    }
+
     // ---- Formular-Steuerung ----
     function _startAdd() {
         _editingId = ""
@@ -263,9 +271,16 @@ Rectangle {
                                     elide: Text.ElideRight
                                     opacity: 0.85
                                     font.pointSize: Kirigami.Theme.smallFont.pointSize - 1
-                                    font.underline: urlHover.hovered
-                                    HoverHandler { id: urlHover; cursorShape: Qt.PointingHandCursor }
-                                    TapHandler { onTapped: Qt.openUrlExternally(modelData.url) }
+                                    font.underline: urlHover.hovered && knowledge._isSafeLink(modelData.url)
+                                    HoverHandler {
+                                        id: urlHover
+                                        cursorShape: knowledge._isSafeLink(modelData.url) ? Qt.PointingHandCursor : Qt.ArrowCursor
+                                    }
+                                    // Unsicheres Schema (file://, custom://, ...): deaktiviert, kein Öffnen
+                                    TapHandler {
+                                        enabled: knowledge._isSafeLink(modelData.url)
+                                        onTapped: Qt.openUrlExternally(modelData.url)
+                                    }
                                 }
                                 RowLayout {
                                     spacing: Kirigami.Units.smallSpacing

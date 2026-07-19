@@ -32,6 +32,13 @@ Item {
     property string _promptId: ""
     property string _promptText: ""
     property int _pollCount: 0
+    // Lauf-Token statt Bool-Flag: cancel() und jedes generate() erhöhen _run.
+    // Jeder async Callback (Submit/Poll/Download) merkt sich beim Absenden sein
+    // Token und verwirft sich, wenn es nicht mehr zum aktuellen Lauf passt —
+    // so feuern nach cancel() weder finished noch failed, und selbst ein
+    // synchroner Sofort-Neustart (alter Callback trifft erst nach dem neuen
+    // generate() ein) kann den neuen Lauf nicht kapern.
+    property int _run: 0
     readonly property string _imageDir: FileIO.standardPath("appData") + "/images"
 
     function checkAvailability() {
@@ -48,6 +55,7 @@ Item {
     // params: { prompt, model, width, height, seed (optional) }
     function generate(params) {
         if (busy) { failed("Es läuft bereits eine Generierung"); return }
+        _run += 1    // neuer Lauf: alle noch unterwegs befindlichen alten Callbacks verwerfen
         busy = true
         statusText = "Lade Workflow..."
         _promptText = params.prompt
@@ -76,9 +84,26 @@ Item {
         _submit(wf)
     }
 
+    // Lokalen Abbruch (z. B. Chat-Stop bei tool-initiierter Generierung): die
+    // Generierung auf dem Server läuft zu Ende (ComfyUI kann von hier nicht
+    // abgebrochen werden), aber lokal wird NICHTS mehr heruntergeladen oder
+    // gespeichert und kein Signal gefeuert. Ein evtl. schon angestoßener
+    // Download schreibt seine Datei noch zu Ende (kein Http-Abort) — sein
+    // Callback wird verworfen, das fertige Bild landet nicht im Chat.
+    function cancel() {
+        if (!busy) return
+        _run += 1    // in-flight Callbacks dieses Laufs verwerfen (Token-Mismatch)
+        pollTimer.stop()
+        busy = false
+        statusText = ""
+        toolInitiated = false
+    }
+
     function _submit(wf) {
         statusText = "Sende an ComfyUI..."
+        var run = _run
         Http.postJson(endpoint + "/prompt", { "prompt": wf }, function(res) {
+            if (run !== comfy._run) return   // Lauf verworfen (cancel/neuer generate)
             if (!res.ok) {
                 comfy._fail("ComfyUI nicht erreichbar" + (res.status ? " (HTTP " + res.status + ")" : ""))
                 return
@@ -107,7 +132,9 @@ Item {
             _fail("Zeitüberschreitung bei der Generierung")
             return
         }
+        var run = _run
         Http.getJson(endpoint + "/history/" + _promptId, function(res) {
+            if (run !== comfy._run) return   // Lauf verworfen (cancel/neuer generate)
             if (!res.ok) return   // einzelner Poll-Fehler: nächster Tick versucht es erneut
             var entry = res.data[comfy._promptId]
             if (!entry) return
@@ -136,7 +163,9 @@ Item {
                 + "&subfolder=" + encodeURIComponent(img.subfolder || "")
                 + "&type=" + (img.type || "output")
         var dest = _imageDir + "/aurora-" + Date.now() + ".png"
+        var run = _run
         Http.downloadToFile(url, dest, function(res) {
+            if (run !== comfy._run) return   // Lauf verworfen (cancel/neuer generate)
             comfy.busy = false
             comfy.statusText = ""
             if (res.ok) {

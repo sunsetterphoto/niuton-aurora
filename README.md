@@ -17,8 +17,10 @@ processing.
 - **Image generation** via [ComfyUI](https://github.com/comfyanonymous/ComfyUI) (semantic workflow
   templates), from a chat tool or a dedicated image panel.
 - **Voice**: speech-to-text via whisper.cpp and text-to-speech via [Piper](https://github.com/rhasspy/piper).
-- **Conversation history** in SQLite, plus a **knowledge base**: thumbs-up rated answers and
-  manually curated entries (links / notes / facts), embedded for later retrieval.
+- **Conversation history** in SQLite, plus a **knowledge base with RAG**: thumbs-up rated
+  answers and manually curated entries (links / notes / facts) are embedded; on similar new
+  questions the best matches are retrieved into the system prompt, with per-answer source
+  attribution (configurable: on/off, top-k, similarity threshold).
 - **Slash commands**: `/help`, `/model`, `/new`, `/search`, `/image`, `/memory`, `/knowledge`,
   `/export`, `/compact`.
 - **Two front-ends, one engine**: a Plasma 6 panel widget and a standalone Kirigami app share the

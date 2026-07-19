@@ -29,5 +29,24 @@ function plan(opts) {
     var canFold = verbatim.length > keepRecent
     var needsCompaction = (over || opts.force === true) && canFold
     var foldCount = needsCompaction ? (verbatim.length - keepRecent) : 0
-    return { budget: budget, estimatedTokens: est, needsCompaction: needsCompaction, foldCount: foldCount }
+
+    // Audit-Fix (Klein/logic): ueber Budget, aber zu wenig Nachrichten zum Falten
+    // (<= keepRecent — zu wenig Material fuer eine sinnvolle LLM-Synopse) feuerte
+    // die Kompaktierung bisher NIE: 4 riesige Nachrichten @8192 ctx liefen in den
+    // Overflow und Ollama trunkierte still. Stattdessen die AELTESTEN wörtlichen
+    // Nachrichten verwerfen (trimCount), bis der Rest unter der Schwelle liegt.
+    // Mindestens 1 Nachricht bleibt immer — die aktuelle Frage wird nie verworfen
+    // und auch nicht im Inhalt gekuerzt; ein einzelner Oversize-Rest faellt
+    // bewusst weiterhin an Ollamas Trunkierung (wie bisher).
+    var trimCount = 0
+    if (over && !canFold) {
+        var rest = est
+        var schwelle = thresholdFraction * budget
+        while (trimCount < verbatim.length - 1 && rest > schwelle) {
+            rest -= estimateTokens(verbatim[trimCount] ? verbatim[trimCount].content : "")
+            trimCount++
+        }
+    }
+    return { budget: budget, estimatedTokens: est, needsCompaction: needsCompaction,
+             foldCount: foldCount, trimCount: trimCount }
 }

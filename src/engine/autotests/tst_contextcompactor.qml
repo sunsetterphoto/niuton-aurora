@@ -39,7 +39,51 @@ TestCase {
         var p = CC.plan({ verbatim: _verbatim(4, 100000), summary: "", systemPromptText: "",
                           numCtx: 8192, numPredict: 0, keepRecent: 6,
                           thresholdFraction: 0.75, assumedCtx: 8192, responseReserve: 1024 })
-        compare(p.needsCompaction, false)          // 4 <= keepRecent, trotz Überschreitung
+        compare(p.needsCompaction, false)          // 4 <= keepRecent -> KEINE LLM-Synopse
+        // Audit-Fix: aber über Budget -> stattdessen älteste Nachrichten verwerfen
+        // (trimCount), mindestens 1 bleibt. 4 x 25000 Tokens: nach 3 Drops stoppt
+        // die Schleife am Floor (len-1), auch wenn der Rest noch über Budget liegt.
+        compare(p.trimCount, 3)
+    }
+
+    // Audit-Fix (ContextCompactor.js:30): <= keepRecent Nachrichten, aber über
+    // Budget — bisher feuerte die Kompaktierung NIE (Ollama trunkierte still).
+    // Jetzt: älteste Nachrichten verwerfen, bis der Rest ins Budget passt.
+    function test_wenigeRiesige_trimmtAeltesteInsBudget() {
+        // 4 x 10000 Zeichen = 4 x 2500 Tokens = 10000; Budget 7168, Schwelle 5376.
+        // Drop 2 aelteste -> 5000 <= 5376.
+        var p = CC.plan({ verbatim: _verbatim(4, 10000), summary: "", systemPromptText: "",
+                          numCtx: 8192, numPredict: 0, keepRecent: 6,
+                          thresholdFraction: 0.75, assumedCtx: 8192, responseReserve: 1024 })
+        compare(p.needsCompaction, false)          // zu wenig Material zum Falten
+        compare(p.foldCount, 0)
+        compare(p.trimCount, 2)
+        // Rest-Budget eingehalten: 2 x 2500 <= 0.75 * 7168
+        verify(2 * 2500 <= 0.75 * p.budget)
+    }
+
+    function test_trim_nieLetzteNachrichtVerwerfen() {
+        // Eine einzige riesige Nachricht (aktuelle Frage): nichts zu verwerfen,
+        // bewusst kein Content-Kuerzen — Rest faellt wie bisher an Ollama.
+        var p = CC.plan({ verbatim: _verbatim(1, 100000), summary: "", systemPromptText: "",
+                          numCtx: 8192, numPredict: 0, keepRecent: 6,
+                          thresholdFraction: 0.75, assumedCtx: 8192, responseReserve: 1024 })
+        compare(p.needsCompaction, false)
+        compare(p.trimCount, 0)
+        // Zwei riesige: nur die aelteste faellt weg, die aktuelle bleibt.
+        var p2 = CC.plan({ verbatim: _verbatim(2, 100000), summary: "", systemPromptText: "",
+                           numCtx: 8192, numPredict: 0, keepRecent: 6,
+                           thresholdFraction: 0.75, assumedCtx: 8192, responseReserve: 1024 })
+        compare(p2.trimCount, 1)
+    }
+
+    function test_faltenSchlaegtTrimmen() {
+        // > keepRecent UND ueber Budget: unveraendert der Fold-Pfad, kein Trim.
+        var p = CC.plan({ verbatim: _verbatim(30, 4000), summary: "", systemPromptText: "",
+                          numCtx: 8192, numPredict: 0, keepRecent: 6,
+                          thresholdFraction: 0.75, assumedCtx: 8192, responseReserve: 1024 })
+        compare(p.needsCompaction, true)
+        compare(p.trimCount, 0)
     }
 
     function test_numCtxUngesetzt_nutztAssumed() {

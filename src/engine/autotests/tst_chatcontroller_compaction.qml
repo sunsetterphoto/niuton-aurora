@@ -140,6 +140,24 @@ Item {
             compare(lastJob, staleJob)                        // KEIN _startTurn -> kein zweiter Job
         }
 
+        // Audit-Fix (ContextCompactor.js): <= keepRecent Nachrichten, aber weit
+        // ueber Budget (hier erzwungen ueber num_ctx 512) — KEIN LLM-Fold (zu
+        // wenig Material), stattdessen fallen die aeltesten Nachrichten aus dem
+        // API-Kontext (_summarizedCount rueckt ohne Synopse vor).
+        function test_trimOhneLLM_wenigeNachrichtenUeberBudget() {
+            ctl._messages = _bigHistory(4)                // 4 <= keepRecent(6)
+            var called = false
+            ctl._maybeCompact(function() { called = true })
+            compare(lastJob, null)                        // kein LLM-Aufruf
+            verify(called)
+            compare(ctl._contextSummary, "")              // keine Synopse
+            compare(ctl._summarizedCount, 3)              // aelteste 3 verworfen
+            var msgs = ctl._buildMessages()
+            compare(msgs.length, 2)                       // system + 1 wörtliche
+            compare(msgs[1].role, "assistant")            // die NEUESTE bleibt
+            compare(storeMock.updateConvCount, 0)         // Trim wird nicht persistiert
+        }
+
         // Persistenz-Anker muss den Reload-Filter überleben: liegt an der Faltgrenze
         // eine tool-Zeile, verankert die Synopse an der letzten user/assistant-Zeile
         // davor (die loadConversation wieder in _messages aufnimmt) — nicht an "t99".

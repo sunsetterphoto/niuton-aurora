@@ -158,6 +158,7 @@ ColumnLayout {
                 onRegenerateRequested: root.controller.regenerate()
                 onSpeakRequested: function(text) { root.controller.speak(text) }
                 onRateRequested: function(msgId, rating) { root.controller.rateMessage(msgId, rating) }
+                onRagSourceRemoveRequested: function(rowMsgId, source, id) { root.controller.removeRagSource(rowMsgId, source, id) }
                 onConfirmOnceRequested: root.controller.confirmOnce()
                 onConfirmForConversationRequested: root.controller.confirmForConversation()
                 onRejectRequested: root.controller.reject()

@@ -71,12 +71,18 @@ PlasmoidItem {
 
         Timer {
             interval: 50
-            running: true
+            // Nicht rund um die Uhr mit 20 fps repainten (Idle-Last der
+            // plasmashell/Akku): die Animation läuft nur, solange Aurora
+            // arbeitet (dann schneller) oder das Popup geöffnet ist. Beim
+            // Stoppen ein letzter Frame, damit das Ruhe-Bild (gedimmte
+            // Alpha/Border) statt des letzten Lade-Frames stehen bleibt.
+            running: root.isLoading || root.expanded
             repeat: true
             onTriggered: {
                 compactMouse._time += 0.05
                 auroraCanvas.requestPaint()
             }
+            onRunningChanged: if (!running) auroraCanvas.requestPaint()
         }
 
         Canvas {

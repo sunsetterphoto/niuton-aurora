@@ -74,6 +74,15 @@
     <entry name="embedModel" type="String">
       <default>nomic-embed-text</default>
     </entry>
+    <entry name="ragEnabled" type="Bool">
+      <default>true</default>
+    </entry>
+    <entry name="ragTopK" type="Int">
+      <default>3</default>
+    </entry>
+    <entry name="ragThreshold" type="Double">
+      <default>0.75</default>
+    </entry>
   </group>
 
   <group name="Comfy">

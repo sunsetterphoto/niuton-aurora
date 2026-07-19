@@ -202,6 +202,45 @@ private Q_SLOTS:
         QCOMPARE(stream.active(), false);
     }
 
+    // Haertungswelle Fund 3: eine newline-lose Riesenzeile wuerde den Puffer
+    // bis zum Idle-Timeout (90 s) unbegrenzt wachsen lassen. maxLineBytes
+    // bricht den Stream sofort mit Fehler ab; die angefangene Zeile wird
+    // verworfen (der Body hier ist GUELTIGES JSON — ein Flush in onFinished
+    // wuerde ihn sonst als Objekt emittieren).
+    void zeilenLimit_ueberschritten_brichtMitFehlerAb_undVerwirftZeile()
+    {
+        TestHttpServer server;
+        server.setResponse(200, "{\"x\":\"" + QByteArray(500, 'a') + "\"}");   // > Limit, kein \n
+        NdjsonStream stream;
+        QCOMPARE(stream.maxLineBytes(), 1048576);   // Default: 1 MiB
+        stream.setMaxLineBytes(64);
+        QSignalSpy objects(&stream, &NdjsonStream::objectReceived);
+        QSignalSpy finished(&stream, &NdjsonStream::finished);
+        stream.post(server.baseUrl() + "/x", QVariantMap());
+        QVERIFY(finished.wait(5000));
+        QCOMPARE(finished.count(), 1);
+        QCOMPARE(finished.first().at(0).toBool(), false);
+        QCOMPARE(finished.first().at(2).toString(), QString("line too long"));
+        QCOMPARE(objects.count(), 0);   // Zeile verworfen, kein Flush
+        QCOMPARE(stream.active(), false);
+    }
+
+    // Fund 3, Gegenprobe: Zeilen UNTER dem Limit laufen auch bei kleinem
+    // Limit normal durch; erst die newline-lose Restzeile loest aus.
+    void zeilenLimit_kurzeZeilenLaufenNormal()
+    {
+        TestHttpServer server;
+        server.setResponse(200, "{\"a\":1}\n{\"done\":true}\n");
+        NdjsonStream stream;
+        stream.setMaxLineBytes(64);
+        QSignalSpy objects(&stream, &NdjsonStream::objectReceived);
+        QSignalSpy finished(&stream, &NdjsonStream::finished);
+        stream.post(server.baseUrl() + "/x", QVariantMap());
+        QVERIFY(finished.wait(5000));
+        QCOMPARE(objects.count(), 2);
+        QCOMPARE(finished.first().at(0).toBool(), true);
+    }
+
     void verbindungAbgelehnt_liefertFehler()
     {
         NdjsonStream stream;

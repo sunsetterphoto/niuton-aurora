@@ -10,6 +10,31 @@ TestCase {
         compare(Export.filename("", "20260712-143000"), "aurora-20260712-143000.md")
     }
 
+    // Nicht-lateinische Titel sluggen zu "" — statt der Kollision auf
+    // "aurora-<ts>.md" hängt filename() dann einen stabilen Titel-Hash an.
+    function test_filenameNichtLateinischBekommtHash() {
+        var f1 = Export.filename("日本語のタイトル", "20260719-120000")
+        verify(/^aurora-[0-9a-f]{6}-20260719-120000\.md$/.test(f1))
+
+        // gleicher Titel -> gleicher (deterministischer) Hash
+        compare(Export.filename("日本語のタイトル", "20260719-120000"), f1)
+
+        // verschiedene Titel, gleiche Sekunde -> KEINE Dateinamens-Kollision
+        var f2 = Export.filename("別のタイトル", "20260719-120000")
+        verify(/^aurora-[0-9a-f]{6}-20260719-120000\.md$/.test(f2))
+        verify(f2 !== f1)
+
+        // kyrillisch ebenso
+        var f3 = Export.filename("Привет мир", "20260719-120000")
+        verify(/^aurora-[0-9a-f]{6}-20260719-120000\.md$/.test(f3))
+        verify(f3 !== f1 && f3 !== f2)
+
+        // lateinischer Titel: unverändert Slug OHNE Hash
+        compare(Export.filename("Mein Chat", "20260719-120000"), "mein-chat-20260719-120000.md")
+        // leerer Titel: unverändert generischer Name OHNE Hash
+        compare(Export.filename("", "20260719-120000"), "aurora-20260719-120000.md")
+    }
+
     function test_toMarkdown() {
         var rows = [
             { role: "user",      content: "Hallo",      mediaPath: "" },

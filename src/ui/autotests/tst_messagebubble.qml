@@ -20,6 +20,7 @@ TestCase {
             toolActivity: ""
             msgId: ""
             rating: 0
+            ragSources: "[]"
         }
     }
 

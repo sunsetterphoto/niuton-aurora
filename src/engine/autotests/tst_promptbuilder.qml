@@ -68,5 +68,61 @@ Item {
             var pNone = PromptBuilder.build({ homeDir: "/home/x", now: "X", activeModel: "" })
             verify(pNone.indexOf("Active model:") < 0)   // leeres Modell -> keine Zeile
         }
+
+        function test_knowledgeSection() {
+            var p = PromptBuilder.build({
+                homeDir: "/home/x",
+                knowledge: [
+                    { source: "rated", question: "Wie boote ich ins BIOS?", answer: "F2 drücken." },
+                    { source: "knowledge", kind: "link", title: "Fedora Downgrade",
+                      url: "https://example.org/k", content: "dnf downgrade kernel" },
+                    { source: "knowledge", kind: "fact", title: "Piper-Pfad", url: "", content: "aurora/piper" }
+                ]
+            })
+            verify(p.indexOf("## Knowledge base") >= 0)
+            verify(p.indexOf("- Q: Wie boote ich ins BIOS?") >= 0)
+            verify(p.indexOf("  A: F2 drücken.") >= 0)
+            verify(p.indexOf("Fedora Downgrade (https://example.org/k): dnf downgrade kernel") >= 0)
+            verify(p.indexOf("- Piper-Pfad: aurora/piper") >= 0)
+        }
+
+        function test_knowledgeTruncation() {
+            var longAnswer = ""
+            for (var i = 0; i < 1000; i++) longAnswer += "a"
+            var longQuestion = ""
+            for (var j = 0; j < 300; j++) longQuestion += "q"
+            var p = PromptBuilder.build({
+                homeDir: "/home/x",
+                knowledge: [{ source: "rated", question: longQuestion, answer: longAnswer }]
+            })
+            verify(p.indexOf("…") >= 0)
+            // gekürzt: 200 bzw. 800 Zeichen + Ellipse, nicht die volle Länge
+            verify(p.indexOf(longAnswer) < 0)
+            verify(p.indexOf(longQuestion) < 0)
+        }
+
+        function test_noKnowledgeSection() {
+            var p1 = PromptBuilder.build({ homeDir: "/home/x" })
+            verify(p1.indexOf("## Knowledge base") < 0)      // opt fehlt
+            var p2 = PromptBuilder.build({ homeDir: "/home/x", knowledge: [] })
+            verify(p2.indexOf("## Knowledge base") < 0)      // leeres Array
+        }
+
+        function test_knowledgeNewlinesCollapsed() {
+            // Rohe Umbrüche aus KB-Inhalten dürfen die Sektions-Struktur nicht
+            // verwässern — sie werden zu " / " geglättet.
+            var p = PromptBuilder.build({
+                homeDir: "/home/x",
+                knowledge: [
+                    { source: "rated", question: "Zeile 1\nZeile 2", answer: "A1\n\nA2" },
+                    { source: "knowledge", kind: "note", title: "Titel\nmit Umbruch", url: "", content: "c" }
+                ]
+            })
+            verify(p.indexOf("Zeile 1 / Zeile 2") >= 0)
+            verify(p.indexOf("A1 / A2") >= 0)
+            verify(p.indexOf("Titel / mit Umbruch: c") >= 0)
+            // keine rohen Umbrüche innerhalb eines Eintrags (nur die der Struktur)
+            verify(p.indexOf("- Q: Zeile 1 / Zeile 2\n") >= 0)
+        }
     }
 }

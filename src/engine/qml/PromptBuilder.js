@@ -1,5 +1,13 @@
 .pragma library
 
+// Kürzt auf max Zeichen (mit Ellipse), robust gegen null/undefined. Zeilenumbrüche
+// werden zu " / " geglättet — rohe Umbrüche aus KB-Inhalten würden sonst die
+// Sektions-Struktur des Prompts verwässern (eigene Zeilen ohne "- "-Präfix).
+function _trunc(s, max) {
+    s = String(s || "").replace(/\s*\n+\s*/g, " / ")
+    return s.length > max ? s.substring(0, max - 1) + "…" : s
+}
+
 // Baut den Systemprompt frisch pro Request. toolSection kommt vom Aufrufer
 // (ToolRegistry.promptSection); die dynamischen Kontext-Werte (now/timezone/
 // locale/userName/activeModel/isRemote) sammelt der Aufrufer (ChatController) —
@@ -47,6 +55,25 @@ function build(opts) {
 
     if (opts.memory) {
         ctx += "\n## Memory\n" + opts.memory + "\n"
+    }
+
+    // Wissensbasis (Scheibe C): vom Retrieval gelieferte Treffer (bewertete Antworten
+    // + manuelle Einträge) als konservativ gekürzter Block hinter ## Memory.
+    if (opts.knowledge && opts.knowledge.length) {
+        ctx += "\n## Knowledge base\n"
+        ctx += "Entries from the user's personal knowledge base that may be relevant to the"
+        ctx += " current question. Use them when they fit; ignore them otherwise.\n"
+        for (var i = 0; i < opts.knowledge.length; i++) {
+            var k = opts.knowledge[i] || {}
+            if (k.source === "rated") {
+                ctx += "- Q: " + _trunc(k.question, 200) + "\n"
+                ctx += "  A: " + _trunc(k.answer, 800) + "\n"
+            } else {
+                var head = _trunc(k.title, 100)
+                if (k.kind === "link" && k.url) head += (head !== "" ? " " : "") + "(" + _trunc(k.url, 120) + ")"
+                ctx += "- " + (head !== "" ? head + ": " : "") + _trunc(k.content, 500) + "\n"
+            }
+        }
     }
 
     return ctx

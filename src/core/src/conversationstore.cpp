@@ -10,6 +10,11 @@
 #include <QSqlQuery>
 #include <QStandardPaths>
 #include <QUuid>
+#include <QVector>
+
+#include <algorithm>
+#include <cmath>
+#include <cstring>
 
 namespace {
 
@@ -72,6 +77,35 @@ QVariantMap jsonToMap(const QString &json)
 {
     const QJsonDocument doc = QJsonDocument::fromJson(json.toUtf8());
     return doc.isObject() ? doc.object().toVariantMap() : QVariantMap();
+}
+
+// BLOB (float32, wie von setEmbedding/setKnowledgeEmbedding gepackt) -> QVector<float>.
+// Leerer Vektor bei ungültiger Größe (kein Vielfaches von sizeof(float)).
+QVector<float> unpackFloats(const QByteArray &blob)
+{
+    QVector<float> v;
+    if (blob.isEmpty() || blob.size() % int(sizeof(float)) != 0)
+        return v;
+    v.resize(blob.size() / int(sizeof(float)));
+    std::memcpy(v.data(), blob.constData(), size_t(blob.size()));
+    return v;
+}
+
+// Cosinus-Ähnlichkeit Query x Kandidaten-BLOB. Rückgabe -2.0 (ungültig) bei
+// Dimensions-Mismatch oder Nullnorm — unterhalb jeder denkbaren minScore-Schwelle.
+double cosineScore(const QVector<float> &q, double qNorm, const QByteArray &blob)
+{
+    const QVector<float> c = unpackFloats(blob);
+    if (c.isEmpty() || c.size() != q.size())
+        return -2.0;
+    double dot = 0.0, cNorm = 0.0;
+    for (int i = 0; i < q.size(); ++i) {
+        dot += double(q[i]) * double(c[i]);
+        cNorm += double(c[i]) * double(c[i]);
+    }
+    if (cNorm <= 0.0)
+        return -2.0;
+    return dot / (qNorm * std::sqrt(cNorm));
 }
 
 // Migrationsschritte, je in einer Transaktion (PRAGMA user_version).
@@ -337,6 +371,21 @@ bool StoreWorker::execOp(QSqlDatabase &db, const QString &op, const QVariantMap 
         return false;
     };
 
+    // id-adressierte UPDATE/DELETE-Ops: 0 betroffene Zeilen heißt, die :id traf
+    // nichts — bisher ein stiller No-op bei gemeldetem writeCompleted. Als Fehler
+    // melden, damit writeFailed ihn sichtbar macht. Bewusst tolerante Ops
+    // (createConversation, appendMessage, touchConversation, deleteConversation,
+    // sweepNonFinal) nutzen diesen Pfad NICHT.
+    auto execIdOp = [&]() -> bool {
+        if (!q.exec())
+            return fail(q);
+        if (q.numRowsAffected() == 0) {
+            if (error) *error = QStringLiteral("Keine Zeile mit dieser id (0 Zeilen betroffen)");
+            return false;
+        }
+        return true;
+    };
+
     if (op == QLatin1String("createConversation")) {
         q.prepare(QStringLiteral(
             "INSERT OR IGNORE INTO conversations(id, title, created_at, updated_at) "
@@ -431,7 +480,7 @@ bool StoreWorker::execOp(QSqlDatabase &db, const QString &op, const QVariantMap 
         q.prepare(QStringLiteral("UPDATE conversations SET extra = :extra WHERE id = :id"));
         q.bindValue(QStringLiteral(":extra"), extraToJson(a.value(QStringLiteral("extra"))));
         q.bindValue(QStringLiteral(":id"), textOrEmpty(a.value(QStringLiteral("id"))));
-        return q.exec() ? true : fail(q);
+        return execIdOp();
     }
 
     if (op == QLatin1String("updateMessage")) {
@@ -462,8 +511,8 @@ bool StoreWorker::execOp(QSqlDatabase &db, const QString &op, const QVariantMap 
                 // ohne diese Absicherung würde eine null-QString den Write scheitern lassen.
                 q.bindValue(QString(QStringLiteral(":") + k), textOrEmpty(a.value(k)));
         }
-        q.bindValue(QStringLiteral(":id"), a.value(QStringLiteral("id")));
-        return q.exec() ? true : fail(q);
+        q.bindValue(QStringLiteral(":id"), textOrEmpty(a.value(QStringLiteral("id"))));
+        return execIdOp();
     }
 
     if (op == QLatin1String("setEmbedding")) {
@@ -483,8 +532,8 @@ bool StoreWorker::execOp(QSqlDatabase &db, const QString &op, const QVariantMap 
             q.bindValue(QStringLiteral(":emb"), blob);
             q.bindValue(QStringLiteral(":model"), textOrEmpty(a.value(QStringLiteral("model"))));
         }
-        q.bindValue(QStringLiteral(":id"), a.value(QStringLiteral("id")));
-        return q.exec() ? true : fail(q);
+        q.bindValue(QStringLiteral(":id"), textOrEmpty(a.value(QStringLiteral("id"))));
+        return execIdOp();
     }
 
     if (op == QLatin1String("addKnowledge")) {
@@ -526,8 +575,8 @@ bool StoreWorker::execOp(QSqlDatabase &db, const QString &op, const QVariantMap 
                 q.bindValue(QString(QStringLiteral(":") + k), textOrEmpty(a.value(k)));
         }
         q.bindValue(QStringLiteral(":now"), now);
-        q.bindValue(QStringLiteral(":id"), a.value(QStringLiteral("id")));
-        return q.exec() ? true : fail(q);
+        q.bindValue(QStringLiteral(":id"), textOrEmpty(a.value(QStringLiteral("id"))));
+        return execIdOp();
     }
 
     if (op == QLatin1String("setKnowledgeEmbedding")) {
@@ -546,20 +595,20 @@ bool StoreWorker::execOp(QSqlDatabase &db, const QString &op, const QVariantMap 
             q.bindValue(QStringLiteral(":emb"), blob);
             q.bindValue(QStringLiteral(":model"), textOrEmpty(a.value(QStringLiteral("model"))));
         }
-        q.bindValue(QStringLiteral(":id"), a.value(QStringLiteral("id")));
-        return q.exec() ? true : fail(q);
+        q.bindValue(QStringLiteral(":id"), textOrEmpty(a.value(QStringLiteral("id"))));
+        return execIdOp();
     }
 
     if (op == QLatin1String("deleteKnowledge")) {
         q.prepare(QStringLiteral("DELETE FROM knowledge WHERE id = :id"));
-        q.bindValue(QStringLiteral(":id"), a.value(QStringLiteral("id")));
-        return q.exec() ? true : fail(q);
+        q.bindValue(QStringLiteral(":id"), textOrEmpty(a.value(QStringLiteral("id"))));
+        return execIdOp();
     }
 
     if (op == QLatin1String("deleteMessage")) {
         q.prepare(QStringLiteral("DELETE FROM messages WHERE id = :id"));
-        q.bindValue(QStringLiteral(":id"), a.value(QStringLiteral("id")));
-        return q.exec() ? true : fail(q);
+        q.bindValue(QStringLiteral(":id"), textOrEmpty(a.value(QStringLiteral("id"))));
+        return execIdOp();
     }
 
     if (op == QLatin1String("deleteConversation")) {
@@ -630,8 +679,8 @@ bool StoreWorker::execOp(QSqlDatabase &db, const QString &op, const QVariantMap 
                 // optionale Textfelder — null-QString darf den Write nicht kippen.
                 q.bindValue(QString(QStringLiteral(":") + k), textOrEmpty(a.value(k)));
         }
-        q.bindValue(QStringLiteral(":id"), a.value(QStringLiteral("id")));
-        return q.exec() ? true : fail(q);
+        q.bindValue(QStringLiteral(":id"), textOrEmpty(a.value(QStringLiteral("id"))));
+        return execIdOp();
     }
 
     if (op == QLatin1String("sweepNonFinal")) {
@@ -755,7 +804,12 @@ QVariantList ConversationStore::listConversations(int limit) const
         "SELECT id, title, created_at, updated_at, archived, extra "
         "FROM conversations ORDER BY updated_at DESC LIMIT :n"));
     q.bindValue(QStringLiteral(":n"), limit);
-    if (!q.exec()) return out;
+    if (!q.exec()) {
+        // Reads sind const, das Signal nicht — Emission daher über const_cast.
+        Q_EMIT const_cast<ConversationStore *>(this)->readFailed(
+            QStringLiteral("listConversations"), q.lastError().text());
+        return out;
+    }
     while (q.next()) {
         out.append(QVariantMap{
             {QStringLiteral("id"), q.value(0).toString()},
@@ -779,7 +833,11 @@ QVariantList ConversationStore::messages(const QString &conversationId) const
         " status, created_at, media_path, media_type, extra, rating "
         "FROM messages WHERE conversation_id = :cid ORDER BY seq"));
     q.bindValue(QStringLiteral(":cid"), conversationId);
-    if (!q.exec()) return out;
+    if (!q.exec()) {
+        Q_EMIT const_cast<ConversationStore *>(this)->readFailed(
+            QStringLiteral("messages"), q.lastError().text());
+        return out;
+    }
     while (q.next()) {
         out.append(QVariantMap{
             {QStringLiteral("id"), q.value(0).toString()},
@@ -811,7 +869,12 @@ QVariantMap ConversationStore::conversation(const QString &id) const
         "SELECT id, title, created_at, updated_at, archived, extra "
         "FROM conversations WHERE id = :id"));
     q.bindValue(QStringLiteral(":id"), id);
-    if (!q.exec() || !q.next()) return out;
+    if (!q.exec()) {
+        Q_EMIT const_cast<ConversationStore *>(this)->readFailed(
+            QStringLiteral("conversation"), q.lastError().text());
+        return out;
+    }
+    if (!q.next()) return out;
     out = QVariantMap{
         {QStringLiteral("id"), q.value(0).toString()},
         {QStringLiteral("title"), q.value(1).toString()},
@@ -837,7 +900,11 @@ QVariantList ConversationStore::goodExamples() const
         "FROM messages a "
         "WHERE a.rating = 1 AND a.role = 'assistant' "
         "ORDER BY a.created_at DESC"));
-    if (!q.exec()) return out;
+    if (!q.exec()) {
+        Q_EMIT const_cast<ConversationStore *>(this)->readFailed(
+            QStringLiteral("goodExamples"), q.lastError().text());
+        return out;
+    }
     while (q.next()) {
         out.append(QVariantMap{
             {QStringLiteral("id"), q.value(0).toString()},
@@ -860,7 +927,11 @@ QVariantList ConversationStore::knowledgeEntries() const
         "SELECT id, kind, title, url, content, (embedding IS NOT NULL) AS has_emb,"
         " created_at, updated_at "
         "FROM knowledge ORDER BY created_at DESC"));
-    if (!q.exec()) return out;
+    if (!q.exec()) {
+        Q_EMIT const_cast<ConversationStore *>(this)->readFailed(
+            QStringLiteral("knowledgeEntries"), q.lastError().text());
+        return out;
+    }
     while (q.next()) {
         out.append(QVariantMap{
             {QStringLiteral("id"), q.value(0).toString()},
@@ -876,6 +947,105 @@ QVariantList ConversationStore::knowledgeEntries() const
     return out;
 }
 
+QVariantList ConversationStore::searchSimilar(const QVariantList &queryVec, const QString &embedModel,
+                                              int topK, double minScore) const
+{
+    QVariantList out;
+    if (!m_ready || queryVec.isEmpty())
+        return out;
+    // NaN/negative Schwelle (hand-editierte Config) auf 0 klemmen — sonst würde
+    // der -2.0-Sentinel (Dimensions-Mismatch/Nullnorm) als Treffer durchrutschen
+    // bzw. bei NaN jeder Vergleich s < minScore false (alle Kandidaten „Treffer").
+    if (!(minScore >= 0.0))
+        minScore = 0.0;
+
+    QVector<float> q(queryVec.size());
+    double qNorm = 0.0;
+    for (int i = 0; i < queryVec.size(); ++i) {
+        q[i] = float(queryVec.at(i).toDouble());
+        qNorm += double(q[i]) * double(q[i]);
+    }
+    // !isfinite: NaN/Inf im Query-Vektor (defekte Embed-Antwort) — ohne diesen
+    // Guard wären alle Scores NaN und alle Kandidaten „Treffer".
+    if (!std::isfinite(qNorm) || qNorm <= 0.0)
+        return out;
+    qNorm = std::sqrt(qNorm);
+    const int k = qBound(0, topK, 20);
+
+    // Kandidaten aus BEIDEN Quellen (Scheibe C): bewertete Antworten — strikt
+    // rating=1, nicht bloße Vektor-Präsenz (ein async-Orphan-Vektor auf einer
+    // inzwischen un-bewerteten Zeile darf nie treffen) — und knowledge-Einträge.
+    // embed_model muss zum Query-Modell passen (Vektoren verschiedener Modelle
+    // sind nicht vergleichbar). SQL-Fehler -> betroffene Quelle liefert nichts,
+    // der Fehler wird per readFailed gemeldet (Konvention der Lese-Methoden).
+    QList<QPair<double, QVariantMap>> hits;
+    {
+        QSqlQuery qy(QSqlDatabase::database(m_readConn));
+        qy.prepare(QStringLiteral(
+            "SELECT a.id, a.content, a.embedding,"
+            " (SELECT u.content FROM messages u"
+            "   WHERE u.conversation_id = a.conversation_id AND u.role = 'user'"
+            "     AND u.seq < a.seq ORDER BY u.seq DESC LIMIT 1) AS question "
+            "FROM messages a "
+            "WHERE a.rating = 1 AND a.role = 'assistant'"
+            " AND a.embedding IS NOT NULL AND a.embed_model = :m"));
+        qy.bindValue(QStringLiteral(":m"), embedModel);
+        if (qy.exec()) {
+            while (qy.next()) {
+                const double s = cosineScore(q, qNorm, qy.value(2).toByteArray());
+                if (!std::isfinite(s) || s < minScore)
+                    continue;
+                hits.append({s, QVariantMap{
+                    {QStringLiteral("source"), QStringLiteral("rated")},
+                    {QStringLiteral("id"), qy.value(0).toString()},
+                    {QStringLiteral("score"), s},
+                    {QStringLiteral("question"), qy.value(3).toString()},
+                    {QStringLiteral("answer"), qy.value(1).toString()},
+                }});
+            }
+        } else {
+            Q_EMIT const_cast<ConversationStore *>(this)->readFailed(
+                QStringLiteral("searchSimilar"), qy.lastError().text());
+        }
+    }
+    {
+        QSqlQuery qy(QSqlDatabase::database(m_readConn));
+        qy.prepare(QStringLiteral(
+            "SELECT id, kind, title, url, content, embedding FROM knowledge "
+            "WHERE embedding IS NOT NULL AND embed_model = :m"));
+        qy.bindValue(QStringLiteral(":m"), embedModel);
+        if (qy.exec()) {
+            while (qy.next()) {
+                const double s = cosineScore(q, qNorm, qy.value(5).toByteArray());
+                if (!std::isfinite(s) || s < minScore)
+                    continue;
+                hits.append({s, QVariantMap{
+                    {QStringLiteral("source"), QStringLiteral("knowledge")},
+                    {QStringLiteral("id"), qy.value(0).toString()},
+                    {QStringLiteral("score"), s},
+                    {QStringLiteral("kind"), qy.value(1).toString()},
+                    {QStringLiteral("title"), qy.value(2).toString()},
+                    {QStringLiteral("url"), qy.value(3).toString()},
+                    {QStringLiteral("content"), qy.value(4).toString()},
+                }});
+            }
+        } else {
+            Q_EMIT const_cast<ConversationStore *>(this)->readFailed(
+                QStringLiteral("searchSimilar"), qy.lastError().text());
+        }
+    }
+
+    // stable_sort: bei Score-Gleichstand (z. B. identischer Vektor in messages UND
+    // knowledge) bleibt die Quellen-Reihenfolge deterministisch — wichtig am topK-Cut.
+    std::stable_sort(hits.begin(), hits.end(),
+              [](const QPair<double, QVariantMap> &a, const QPair<double, QVariantMap> &b) {
+                  return a.first > b.first;
+              });
+    for (int i = 0; i < hits.size() && i < k; ++i)
+        out.append(hits.at(i).second);
+    return out;
+}
+
 QString ConversationStore::questionForAnswer(const QString &assistantId) const
 {
     if (!m_ready) return QString();
@@ -886,7 +1056,12 @@ QString ConversationStore::questionForAnswer(const QString &assistantId) const
         "WHERE u.role = 'user' AND u.seq < a.seq "
         "ORDER BY u.seq DESC LIMIT 1"));
     q.bindValue(QStringLiteral(":id"), assistantId);
-    if (!q.exec() || !q.next()) return QString();
+    if (!q.exec()) {
+        Q_EMIT const_cast<ConversationStore *>(this)->readFailed(
+            QStringLiteral("questionForAnswer"), q.lastError().text());
+        return QString();
+    }
+    if (!q.next()) return QString();
     return q.value(0).toString();
 }
 
@@ -894,9 +1069,14 @@ QString ConversationStore::latestConversationId() const
 {
     if (!m_ready) return QString();
     QSqlQuery q(QSqlDatabase::database(m_readConn));
-    if (!q.exec(QStringLiteral(
-            "SELECT id FROM conversations ORDER BY updated_at DESC LIMIT 1"))
-        || !q.next())
+    q.prepare(QStringLiteral(
+        "SELECT id FROM conversations ORDER BY updated_at DESC LIMIT 1"));
+    if (!q.exec()) {
+        Q_EMIT const_cast<ConversationStore *>(this)->readFailed(
+            QStringLiteral("latestConversationId"), q.lastError().text());
+        return QString();
+    }
+    if (!q.next())
         return QString();
     return q.value(0).toString();
 }

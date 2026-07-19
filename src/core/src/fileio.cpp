@@ -80,13 +80,16 @@ QVariantMap FileIO::readBase64(const QString &path, int maxBytes) const
         return fehler(QStringLiteral("Keine reguläre Datei: %1").arg(path));
     }
     const qint64 limit = maxBytes > 0 ? maxBytes : kDefaultBase64Limit;
-    if (f.size() > limit) {
-        return fehler(QStringLiteral("Datei zu groß (%1 Bytes, Limit %2)").arg(f.size()).arg(limit));
-    }
     if (!f.open(QIODevice::ReadOnly)) {
         return fehler(f.errorString());
     }
-    const QByteArray raw = f.readAll();
+    // Limit erst NACH dem open via read(limit+1) durchsetzen (Muster readText):
+    // st_size ist bei /proc-Dateien 0 und bei /sys-Attributen konstant 4096 —
+    // eine size()-Prüfung vor dem open würde das Limit dort unterlaufen (TOCTOU).
+    const QByteArray raw = f.read(limit + 1);
+    if (raw.size() > limit) {
+        return fehler(QStringLiteral("Datei zu groß (Limit %1 Bytes)").arg(limit));
+    }
     const QMimeDatabase mimeDb;
     return {{QStringLiteral("ok"), true},
             {QStringLiteral("data"), QString::fromLatin1(raw.toBase64())},

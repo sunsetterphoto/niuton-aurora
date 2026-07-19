@@ -51,7 +51,12 @@ Item {
         id: aplayProc
         onFinished: function(code, out, err, trunc, to) {
             if (speaker._pendingText !== "") { speaker._maybeStartPending(); return }
+            if (!speaker.speaking) return              // per stop() abgebrochen
             speaker.speaking = false
+            // Wie beim piper-Pfad: ein Nicht-Null-Exit (z. B. ALSA belegt) ist
+            // ein echter Fehler und wird gemeldet statt still verschluckt.
+            if (code !== 0)
+                speaker.errorOccurred("Sprachausgabe fehlgeschlagen" + (err ? ": " + err : ""))
         }
         onFailed: function(m) {
             if (speaker._pendingText !== "") { speaker._maybeStartPending(); return }

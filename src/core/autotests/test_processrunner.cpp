@@ -37,6 +37,15 @@ static bool warteAufEnde(ProcessRunner *pr, int timeoutMs = 5000)
     return true;
 }
 
+// Haertungswelle Fund 4: faengt die QProcess-Dtor-Warnung ab, die der
+// alte (blockierende) Teardown-Pfad im Timeout-Fall produzierte.
+static bool g_destroyedWarning = false;
+static void dtorWarnHandler(QtMsgType, const QMessageLogContext &, const QString &msg)
+{
+    if (msg.contains(QStringLiteral("Destroyed while process is still running")))
+        g_destroyedWarning = true;
+}
+
 class TestProcessRunner : public QObject
 {
     Q_OBJECT
@@ -280,6 +289,31 @@ private Q_SLOTS:
         QVERIFY(!totOderZombie(enkelPid));
         delete pr;                                   // Teardown mit laufendem Prozess
         QTRY_VERIFY(totOderZombie(enkelPid));        // Gruppe (inkl. Enkel) ist tot
+    }
+
+    // Haertungswelle Fund 4: der Dtor darf NIE blockieren (frueher
+    // waitForFinished(1000) — timeoutet bei einem Kind im D-State) und darf
+    // keine "Destroyed while process is still running"-Warnung hinterlassen:
+    // das Kind wird gekillt und der QProcess reapt asynchron selbst.
+    void destruktor_blockiertNicht_undWarntNicht()
+    {
+        g_destroyedWarning = false;
+        QtMessageHandler alt = qInstallMessageHandler(dtorWarnHandler);
+        auto *pr = new ProcessRunner;
+        bool gestartet = false;
+        connect(pr, &ProcessRunner::started, this, [&gestartet]() { gestartet = true; });
+        pr->start("sleep", {"30"});
+        QTRY_VERIFY(gestartet);             // erst nach exec/setsid: Gruppe existiert
+        const qint64 pid = pr->pid();
+        QVERIFY(pid > 0);
+        QElapsedTimer t;
+        t.start();
+        delete pr;                          // darf nicht auf das Kind warten
+        QVERIFY(t.elapsed() < 1000);        // alter Pfad konnte hier 1000 ms haengen
+        QTest::qWait(300);                  // async reap (finished -> deleteLater)
+        qInstallMessageHandler(alt);
+        QVERIFY(!g_destroyedWarning);
+        QTRY_VERIFY(totOderZombie(pid));    // Gruppe wurde trotzdem gekillt
     }
 
     void reentrantStartAusFailedHandler_einLaufKontext()

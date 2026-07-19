@@ -54,17 +54,25 @@ QtObject {
     property var _activity: []                // aktueller toolActivity-Array der Runde
     property var _callStart: ({})              // name|args -> Date.now()
 
+    // --- Wissensbasis Scheibe C (Retrieval) ---
+    property var _ragSources: []               // volle Treffer des aktuellen Zuges (Prompt + slim)
+    property var _ragByMsgId: ({})             // slim-Attribution je persistierter assistant-msgId
+    property var _ragFinish: null              // Abschluss-Closure des laufenden Retrievals
+    // Eigener 8-s-Guard: der 20-s-HTTP-Timeout des Embed-Calls wäre für einen
+    // blockierenden Zug zu lang; späte Callbacks werden via done/_generation verworfen.
+    property Timer _ragTimer: Timer { interval: 8000; repeat: false; onTriggered: ctl._onRagTimeout() }
+
     signal messageAppended()
     signal assistantFinal(string text)   // feuert bei _finalizeAssistant("final") — Auto-Vorlesen-Trigger
 
-    // ---- ListModel-Helfer: setzt IMMER alle 11 Rollen ----
+    // ---- ListModel-Helfer: setzt IMMER alle 12 Rollen ----
     function _appendRow(f) {
         chatModel.append({
             "msgId": f.msgId || "", "text": f.text || "", "isUser": f.isUser === true,
             "thinking": f.thinking || "", "streaming": f.streaming === true,
             "ts": f.ts || "", "mediaPath": f.mediaPath || "", "mediaType": f.mediaType || "",
             "status": f.status || "", "toolActivity": f.toolActivity || "[]",
-            "rating": f.rating || 0
+            "rating": f.rating || 0, "ragSources": f.ragSources || "[]"
         })
         messageAppended()
     }
@@ -140,15 +148,37 @@ QtObject {
         }
     }
 
-    function _systemPrompt() {
+    // Audit-Fix (Klein/perf): _systemPrompt() laeuft pro _buildMessages() — bei
+    // einem 5-Runden-Tool-Zug waren das ~24 synchrone Disk-Reads auf dem
+    // GUI-Thread. hostname/osName/ramGB aendern sich zur Laufzeit nicht ->
+    // einmalig gelesen und in _sysStatic gehalten. memory.md ist dagegen
+    // nutzer-editierbar -> pro ZUG einmal frisch (Cache _memoryCache, am
+    // send()-Einstieg invalidiert), nicht pro Runde.
+    property var _sysStatic: null
+    property var _memoryCache: null          // null = veraltet/noch nicht gelesen
+
+    function _sysStaticRead() {
+        if (ctl._sysStatic !== null) return ctl._sysStatic
         var host = ctl.fileio ? ctl.fileio.readText("/etc/hostname", 256) : { ok: false }
         var osRel = ctl.fileio ? ctl.fileio.readText("/etc/os-release", 4096) : { ok: false }
         var meminfo = ctl.fileio ? ctl.fileio.readText("/proc/meminfo", 4096) : { ok: false }
-        var mem = ctl.fileio ? ctl.fileio.readText((ctl.fileio.standardPath("appData")) + "/memory.md", 65536) : { ok: false }
         var osName = ""
         if (osRel.ok) { var m1 = osRel.text.match(/PRETTY_NAME="([^"]+)"/); osName = m1 ? m1[1] : "Linux" }
         var ramGB = ""
         if (meminfo.ok) { var m2 = meminfo.text.match(/MemTotal:\s+(\d+)/); if (m2) ramGB = Math.round(parseInt(m2[1]) / 1024 / 1024) + " GB" }
+        ctl._sysStatic = { "hostname": host.ok ? host.text.trim() : "", "osName": osName, "ramGB": ramGB }
+        return ctl._sysStatic
+    }
+
+    function _memoryRead() {
+        if (ctl._memoryCache === null)
+            ctl._memoryCache = ctl.fileio ? ctl.fileio.readText((ctl.fileio.standardPath("appData")) + "/memory.md", 65536) : { ok: false }
+        return ctl._memoryCache
+    }
+
+    function _systemPrompt() {
+        var st = _sysStaticRead()
+        var mem = _memoryRead()
 
         // Dynamischer Kontext (frisch pro Request): Datum/Uhrzeit lokalisiert,
         // Zeitzone (Intl, Fallback UTC-Offset), Locale, System-Benutzername.
@@ -166,12 +196,13 @@ QtObject {
 
         return PromptBuilder.build({
             homeDir: ctl.homeDir,
-            hostname: host.ok ? host.text.trim() : "",
-            osName: osName, ramGB: ramGB,
+            hostname: st.hostname,
+            osName: st.osName, ramGB: st.ramGB,
             memory: mem.ok ? mem.text.trim() : "",
             now: now, timezone: tz, locale: Qt.locale().name,
             userName: userName,
             activeModel: ctl.activeModel, isRemote: ctl.isRemote,
+            knowledge: ctl._ragSources,
             toolSection: (ctl.registry && (ctl.activeCaps || []).indexOf("tools") !== -1)
                          ? ctl.registry.promptSection(_buildCtx()) : ""
         })
@@ -205,6 +236,16 @@ QtObject {
             assumedCtx: ctl._assumedCtx, responseReserve: ctl._responseReserve
         })
         if (p.needsCompaction) _summarize(p.foldCount, cb)
+        else if (p.trimCount > 0) {
+            // Audit-Fix (Klein/logic): <= keepRecent Nachrichten, aber über Budget
+            // — zu wenig Material für eine LLM-Synopse. Die ältesten trimCount
+            // Nachrichten fallen aus dem API-Kontext (gleicher Mechanismus wie die
+            // Synopse: _summarizedCount rückt vor, nur ohne Zusammenfassung).
+            // Bewusst NICHT persistiert: nach einem Reload sind sie wieder da und
+            // der nächste Zug trimmt erneut.
+            ctl._summarizedCount += p.trimCount
+            cb()
+        }
         else cb()
     }
 
@@ -327,9 +368,18 @@ QtObject {
         userHist._msgId = uid                             // dito am _messages-Eintrag
         _maybeSetTitle(text)
         // Pro-Zug-Zustand der Tool-Schleife zurücksetzen (Task 3) — _messages bleibt unberührt.
+        // _memoryCache: memory.md wird pro ZUG einmal frisch gelesen (Audit-Fix perf,
+        // s. _systemPrompt) — die Invalidierung hier ist der Zug-Einstieg.
         _loopCache = ({}); _catPolicy.reset(); _queue = []; _queuePos = 0
-        // Vor dem Zug ggf. den Kontext kompaktieren (best-effort, ruft cb immer).
-        _maybeCompact(function() { _startTurn() })
+        _memoryCache = null
+        _ragSources = []
+        // Vor dem Zug ggf. den Kontext kompaktieren, dann Wissensbasis-Retrieval
+        // (beides best-effort, ruft cb immer). Embed-Text = die getippte Frage
+        // (displayText), nicht der API-Inhalt mit Anhang-Dump/Such-Hinweis.
+        _maybeCompact(function() {
+            _retrieve((extra && extra.displayText) ? extra.displayText : text,
+                      function() { _startTurn() })
+        })
     }
 
     function _maybeSetTitle(content) {
@@ -347,6 +397,103 @@ QtObject {
     function _startTurn() {
         _round = 0
         _stream(true)
+    }
+
+    // Wissensbasis Scheibe C: Frage einbetten, ähnliche Einträge suchen und für den
+    // System-Prompt bereithalten. Best-effort: jeder Guard/Fehler/Timeout endet in
+    // cb() ohne Treffer — der Chat läuft immer weiter. Feature-detektiert (schlanke
+    // Test-Mocks ohne searchSimilar/embedFn überspringen still).
+    function _retrieve(text, cb) {
+        _ragSources = []
+        if (ctl.settings && ctl.settings.ragEnabled === false) { cb(); return }
+        if (!ctl.embedFn || !ctl.store || typeof ctl.store.searchSimilar !== "function") { cb(); return }
+        var q = (text || "").trim()
+        if (q.length < 3) { cb(); return }
+        if (q.length > 2000) q = q.substring(0, 2000)
+        var gen = _generation
+        var done = false
+        // LOKALE Closure (nicht über die Property aufrufen): ein verspäteter
+        // Embed-Callback eines ÄLTEREN Zuges darf das Finish eines neueren
+        // Retrievals nie kapern (Szenario send → stop → send: A's Callback träfe
+        // sonst B's Closure über ctl._ragFinish und injizierte A's Treffer).
+        var finish = function(hits) {
+            if (done) return
+            done = true
+            ctl._ragTimer.stop()
+            // stop()/Konversationswechsel hat die Epoche gekippt und state bereits
+            // zurückgesetzt — cb NICHT mehr rufen (kein _startTurn hinterher).
+            if (gen !== _generation) return
+            ctl._ragSources = hits || []
+            cb()
+        }
+        ctl._ragFinish = finish          // nur für den Timeout-Pfad (_onRagTimeout)
+        // busy-Gate gegen Doppel-Send und stop()-Erreichbarkeit während der Suche.
+        state = "streaming"
+        statusText = "Wissensbasis wird durchsucht …"
+        ctl._ragTimer.start()
+        try {
+            ctl.embedFn(q, function(r) {
+                // verworfener Zug (gen gekippt) ODER Timeout längst gefinished:
+                // gar nicht erst arbeiten (kein searchSimilar, kein Finish).
+                if (done || gen !== _generation) return
+                if (!r || !r.vec || r.vec.length === 0) { finish([]); return }
+                var hits = []
+                try {
+                    var topK = (ctl.settings && ctl.settings.ragTopK > 0) ? ctl.settings.ragTopK : 3
+                    // 0.0 ist ein legaler Schwellwert („alles akzeptieren") — nur
+                    // NaN/außerhalb 0..1 fällt auf den Default zurück.
+                    var t = ctl.settings ? ctl.settings.ragThreshold : 0.75
+                    var threshold = (t >= 0 && t <= 1) ? t : 0.75
+                    // Brute-Force-Cosinus synchron auf dem GUI-Thread: bei der
+                    // Größenordnung einer persönlichen Wissensbasis (hunderte
+                    // Vektoren) vernachlässigbar — skaliert linear mit der KB.
+                    hits = ctl.store.searchSimilar(r.vec, r.model, topK, threshold) || []
+                } catch (e) { hits = [] }
+                finish(hits)
+            })
+        } catch (e) { finish([]) }
+    }
+
+    function _onRagTimeout() {
+        if (ctl._ragFinish) ctl._ragFinish([])
+    }
+
+    // Attribution: schlanke Quellen-Liste {source,id,label,score} für Rolle/Persistenz.
+    function _slimRagSources() {
+        var slim = []
+        for (var i = 0; i < ctl._ragSources.length; i++) {
+            var k = ctl._ragSources[i]
+            // Fallbacks: bewertete Zeile ohne vorherige User-Nachricht hat keine
+            // Frage (leeres Label würde einen leeren Chip erzeugen).
+            var label = (k.source === "rated") ? (k.question || k.answer || "Quelle")
+                                               : (k.title || k.url || k.content || "Eintrag")
+            if (label.length > 60) label = label.substring(0, 59) + "…"
+            slim.push({ "source": k.source, "id": k.id, "label": label, "score": k.score })
+        }
+        return slim
+    }
+
+    // Entfernt eine Quelle aus der sichtbaren Attribution einer Bubble UND aus dem
+    // persistierten extra.ragSources der Zeile (sofortiges UI-Feedback, nachdem die
+    // Quelle aus der Wissensbasis gelöscht wurde). Achtung: updateMessage ersetzt
+    // extra atomar — Assistant-Zeilen tragen heute keine anderen extra-Keys.
+    function stripRagSource(rowMsgId, sourceId) {
+        var slim = ctl._ragByMsgId[rowMsgId]
+        if (!slim) return
+        var filtered = []
+        for (var i = 0; i < slim.length; i++) {
+            if (slim[i].id !== sourceId) filtered.push(slim[i])
+        }
+        if (filtered.length === slim.length) return
+        if (filtered.length > 0) ctl._ragByMsgId[rowMsgId] = filtered
+        else delete ctl._ragByMsgId[rowMsgId]
+        for (var r = 0; r < chatModel.count; r++) {
+            if (chatModel.get(r).msgId === rowMsgId) {
+                chatModel.setProperty(r, "ragSources", JSON.stringify(filtered))
+                break
+            }
+        }
+        store.updateMessage(rowMsgId, { "extra": filtered.length > 0 ? { "ragSources": filtered } : ({}) })
     }
 
     function _stream(withTools) {
@@ -465,6 +612,12 @@ QtObject {
         var cat = ctl.registry.categoryOf ? ctl.registry.categoryOf(name) : "local"
         var escalate = ctl._catPolicy.needsEscalation(cat)
         var granted = ctl.grants ? ctl.grants.hasGrant(ctl.conversationId, name) : false
+        // Audit-Fix (Klein/null-safety): resolver wie grants guarden — ohne
+        // injizierten Resolver warf dieser Handler einen TypeError und der State
+        // klemmte in toolRunning. Definiertes Verhalten: konservativ "confirm"
+        // (off ist oben bereits abgefangen) — ohne Resolver laeuft KEIN Tool
+        // still durch, der Nutzer entscheidet explizit.
+        if (!ctl.resolver || typeof ctl.resolver.decide !== "function") return "confirm"
         var d = ctl.resolver.decide(perm, { granted: granted, escalate: escalate })
         return d   // "allow" | "confirm" | "disabled"
     }
@@ -527,6 +680,10 @@ QtObject {
             if (st === "ok" && key) _loopCache[key] = text
             // zustandsverändernde Tools: Loop-Cache leeren (verifizierende reads sollen frisch lesen)
             if (name === "write_file" || name === "run_command") _loopCache = ({})
+            // noteResult NUR hier (Audit-Fix Klein/ux): das Tool lief tatsaechlich —
+            // bei Erfolg UND error. Nicht-ausgefuehrte Tools (denied/off, s.
+            // _feedResult) duerfen die Kategorie-Policy nicht fuettern, sonst
+            // eskaliert das naechste Tool der anderen Kategorie grundlos.
             var cat = ctl.registry.categoryOf ? ctl.registry.categoryOf(name) : "local"
             ctl._catPolicy.noteResult(cat)
             ctl._pushToolMessage(name, text)
@@ -541,8 +698,9 @@ QtObject {
             _activity[_queuePos].status = (status === "ok") ? "done" : status
             _writeActivity()
         }
-        var cat = ctl.registry.categoryOf ? ctl.registry.categoryOf(name) : "local"
-        _catPolicy.noteResult(cat)
+        // Audit-Fix (Klein/ux): hier KEIN _catPolicy.noteResult — _feedResult
+        // laeuft nur fuer NICHT ausgefuehrte Tools (off/disabled/denied) und
+        // Loop-Cache-Treffer (deren erster Lauf bereits in _execute notiert hat).
         _pushToolMessage(name, text)
         _queuePos++
         _runNextCall()
@@ -572,15 +730,23 @@ QtObject {
 
     function _finalizeAssistant(status) {
         _content = _cleanResponse(_content)
-        var aid = _persist({ "role": "assistant", "content": _content, "thinking": _thinking,
-                             "model": ctl.activeModel, "backend": ctl.isRemote ? "remote" : "local",
-                             "status": status })
+        // Attribution (Scheibe C): nur an echte Antworten; slim = {source,id,label,score}.
+        var ragSlim = (status === "final" && ctl._ragSources.length > 0) ? _slimRagSources() : []
+        var msg = { "role": "assistant", "content": _content, "thinking": _thinking,
+                    "model": ctl.activeModel, "backend": ctl.isRemote ? "remote" : "local",
+                    "status": status }
+        if (ragSlim.length > 0) msg.extra = { "ragSources": ragSlim }
+        var aid = _persist(msg)
         if (_streamIndex >= 0 && _streamIndex < chatModel.count) {
             chatModel.setProperty(_streamIndex, "streaming", false)
             chatModel.setProperty(_streamIndex, "text", _content)
             chatModel.setProperty(_streamIndex, "thinking", _thinking)
             chatModel.setProperty(_streamIndex, "status", status)
             chatModel.setProperty(_streamIndex, "msgId", aid)   // regenerate braucht die msgId
+            if (ragSlim.length > 0) {
+                _ragByMsgId[aid] = ragSlim
+                chatModel.setProperty(_streamIndex, "ragSources", JSON.stringify(ragSlim))
+            }
         }
         _messages.push({ "role": "assistant", "content": _content, "_msgId": aid })
         _streamIndex = -1
@@ -594,6 +760,7 @@ QtObject {
     function stop() {
         if (state === "idle") return
         _generation++
+        _ragTimer.stop()          // ein ausstehender Retrieval-Timeout wird zum No-op
         if (_activeJob) { _activeJob.abort(); _activeJob.destroy(); _activeJob = null }
         if (ctl.registry) ctl.registry.abortRunning()
         _queue = []; _queuePos = 0; _pending = null
@@ -621,6 +788,7 @@ QtObject {
         if (state !== "idle") stop()
         chatModel.clear(); _messages = []
         _contextSummary = ""; _summarizedCount = 0
+        _ragSources = []; _ragByMsgId = ({})
         conversationId = store.newUuid()
     }
 
@@ -639,7 +807,10 @@ QtObject {
         var lastUserDisplayText = ""
         while (_messages.length > 0) {
             var m = _messages.pop()
-            if (m._msgId) store.deleteMessage(m._msgId)     // DB-Row (auch tool-Zeilen)
+            if (m._msgId) {
+                store.deleteMessage(m._msgId)     // DB-Row (auch tool-Zeilen)
+                delete _ragByMsgId[m._msgId]      // Attribution-Cache nicht verwaist lassen
+            }
             if (m.role !== "tool" && chatModel.count > 0) {  // tool-Zeilen haben keine Bubble
                 if (m.role === "user") {
                     var row = chatModel.get(chatModel.count - 1)
@@ -678,6 +849,7 @@ QtObject {
     function loadConversation(convId) {
         if (state !== "idle") stop()
         chatModel.clear(); _messages = []
+        _ragSources = []; _ragByMsgId = ({})
         var rows = store.messages(convId)
         conversationId = convId
         var hist = []
@@ -687,12 +859,26 @@ QtObject {
             var imgPath = m.mediaPath || ""
             if (!imgPath && m.extra && m.extra.attachments && m.extra.attachments.length > 0)
                 imgPath = m.extra.attachments[0].path
+            // Audit-Fix (Klein/ux, bewusste Ausblend-Variante aus dem Audit —
+            // toolActivity-Persistenz bleibt Backlog): persistierte assistant-
+            // Zwischenzeilen eines Tool-Zuges (tool_calls, leerer content) nach
+            // dem Reload NICHT als leere Ghost-Bubbles zeigen — weder Bubble noch
+            // _messages-Eintrag. Der Tool-Zug-Kontext entsteht beim Reload
+            // ohnehin nicht (tool-Zeilen werden oben bereits gefiltert).
+            // assistant-Zeilen MIT mediaPath (generierte Bilder) bleiben.
+            if (m.role === "assistant" && !m.content && imgPath === "") continue
+            // Attribution (Scheibe C) aus extra.ragSources restaurieren — mit
+            // Shape-Guard (handeditierte/ältere DBs: String/Map statt Liste).
+            var _ragRaw = (m.extra && m.extra.ragSources) ? m.extra.ragSources : []
+            var rag = (_ragRaw.length > 0 && typeof _ragRaw[0] === "object") ? _ragRaw : []
+            if (rag.length > 0) _ragByMsgId[m.id] = rag
             hist.push({ "role": m.role, "content": m.content, "_msgId": m.id })
             _appendRow({ msgId: m.id, text: m.content, isUser: m.role === "user",
                          thinking: m.thinking || "", status: m.status || "",
                          ts: Qt.formatTime(new Date(m.createdAt), "hh:mm"),
                          mediaPath: imgPath, mediaType: imgPath ? "image" : "",
-                         rating: m.rating || 0 })
+                         rating: m.rating || 0,
+                         ragSources: rag.length > 0 ? JSON.stringify(rag) : "[]" })
         }
         _messages = hist
         // Kompaktierungs-Zustand aus conversations.extra wiederherstellen (Anker: msgId).

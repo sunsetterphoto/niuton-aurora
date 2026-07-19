@@ -24,18 +24,21 @@ ProcessRunner::ProcessRunner(QObject *parent)
 
 ProcessRunner::~ProcessRunner()
 {
-    // Teardown mit laufendem Prozess: der QProcess-Dtor killt nur das direkte
-    // Kind — Enkel (z.B. aus run_command-Shells) würden als Waisen überleben.
-    // Deshalb die ganze Gruppe hart beenden, bevor QProcess aufräumt.
-    if (m_process) {
+    // Teardown mit laufendem Prozess: die ganze Gruppe hart beenden (der
+    // QProcess-Dtor würde nur das direkte Kind killen — Enkel, z.B. aus
+    // run_command-Shells, überlebten als Waisen). Danach ASYNCHRON reapen,
+    // nie blockieren: ein waitForFinished() kann bei einem Kind im D-State
+    // (ununterbrechbarer Syscall) timeouten und ließe den QProcess-Dtor mit
+    // "Destroyed while process is still running" zurück. Stattdessen den
+    // QProcess vom Runner lösen — er löscht sich selbst, sobald das gekillte
+    // Kind endet.
+    if (m_process && m_process->state() != QProcess::NotRunning) {
         m_process->disconnect(this);
-        if (m_process->processId() > 0) {
+        if (m_process->processId() > 0)
             ::killpg(m_process->processId(), SIGKILL);
-            // Kind reapen, damit QProcess beim eigenen Dtor NotRunning sieht —
-            // sonst warnt er "Destroyed while process is still running"
-            // (empirisch bestätigt; SIGKILL ist zugestellt, kehrt sofort zurück).
-            m_process->waitForFinished(1000);
-        }
+        m_process->kill();   // Fallback fürs direkte Kind vor setsid (Starting)
+        m_process->setParent(nullptr);
+        connect(m_process, &QProcess::finished, m_process, &QObject::deleteLater);
     }
 }
 

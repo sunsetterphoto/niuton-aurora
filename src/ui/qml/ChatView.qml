@@ -34,6 +34,7 @@ ColumnLayout {
     signal regenerateRequested()
     signal speakRequested(string text)
     signal rateRequested(string msgId, int rating)
+    signal ragSourceRemoveRequested(string rowMsgId, string source, string id)
     signal confirmOnceRequested()
     signal confirmForConversationRequested()
     signal rejectRequested()
@@ -89,6 +90,7 @@ ColumnLayout {
                 onRegenerateRequested: chatViewRoot.regenerateRequested()
                 onSpeakRequested: function(text) { chatViewRoot.speakRequested(text) }
                 onRateRequested: function(msgId, rating) { chatViewRoot.rateRequested(msgId, rating) }
+                onRagSourceRemoveRequested: function(rowMsgId, source, id) { chatViewRoot.ragSourceRemoveRequested(rowMsgId, source, id) }
             }
 
             // Neue Nachricht -> ans Ende und wieder "kleben", auch wenn der

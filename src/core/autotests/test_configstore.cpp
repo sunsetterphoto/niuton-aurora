@@ -69,6 +69,25 @@ private Q_SLOTS:
         QCOMPARE(s.value("toolMaxRounds").toInt(), 9);
     }
 
+    // Haertungswelle Fund 6 (Nitpick): ein nicht konvertierbarer INI-Wert
+    // (korrupt/hand-editiert) muss auf den SCHEMA-DEFAULT fallen — nicht auf
+    // die Typ-Null des Zieltyps (toolMaxRounds->0 waere "keine Tool-Runden").
+    void corruptIniValueFallsBackToSchemaDefault() {
+        {
+            QFile f(m_path);
+            QVERIFY(f.open(QIODevice::WriteOnly | QIODevice::Text));
+            QTextStream(&f) << "[General]\ntoolMaxRounds=keinezahl\nunloadSeconds=3.5.7\n"
+                               "remoteEnabled=vielleicht\nragThreshold=xyz\n";
+        }
+        ConfigStore s;
+        const QVariant rounds = s.value("toolMaxRounds");
+        QCOMPARE(rounds.metaType().id(), QMetaType::Int);
+        QCOMPARE(rounds.toInt(), 5);                       // Default, nicht 0
+        QCOMPARE(s.value("unloadSeconds").toInt(), 300);   // Default, nicht 0
+        QCOMPARE(s.value("remoteEnabled").toBool(), true); // Default, nicht false
+        QCOMPARE(s.value("ragThreshold").toDouble(), 0.75);
+    }
+
     void resetPreservesMarker() {
         ConfigStore s;
         s.setValue("_migratedFromAppletsrc", true);

@@ -54,12 +54,19 @@ QtObject {
     function loadConversation(id) { _ctl.loadConversation(id) }
     function appendGeneratedImage(p, t, toolInitiated) { _ctl.appendGeneratedImage(p, t, toolInitiated) }
     function rateMessage(msgId, rating) { _ctl.rateMessage(msgId, rating) }
+    function stripRagSource(rowMsgId, sourceId) { _ctl.stripRagSource(rowMsgId, sourceId) }
 
     // Konversations-API
     function listConversations() { return engine.store.listConversations() }
     function deleteConversation(id) {
         if (id === _ctl.conversationId && _ctl.state !== "idle") _ctl.stop()
         engine.store.deleteConversation(id)
+        // Audit-Fix (Klein/resource-leak): Laufzeit-Grants der Konversation mit
+        // aufraeumen (GrantStore.clearConversation existiert, wurde bisher nur in
+        // Tests genutzt). Feature-detektiert, damit schlanke Test-Mocks ohne die
+        // Methode gruen bleiben.
+        if (engine.grants && typeof engine.grants.clearConversation === "function")
+            engine.grants.clearConversation(id)
         if (id === _ctl.conversationId) _ctl.newConversation()
     }
     function goodExamples() { return engine.store ? engine.store.goodExamples() : [] }

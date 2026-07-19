@@ -30,6 +30,13 @@ Item {
         resolver: realResolver; grants: realGrants
         activeModel: "m"; activeCaps: ["tools"]; homeDir: "/h"
         chatFn: function(req){ var j = jobComp.createObject(ctl); lastJob = j; return j } }
+    // Audit-Fix (null-safety): Controller OHNE injizierten Resolver — _decide
+    // darf nicht werfen (State klemmte sonst in toolRunning).
+    property var lastJob2: null
+    ChatController { id: ctlOhneResolver; store: storeMock; settings: settingsMock; registry: registryMock
+        grants: realGrants
+        activeModel: "m"; activeCaps: ["tools"]; homeDir: "/h"
+        chatFn: function(req){ var j = jobComp.createObject(ctlOhneResolver); lastJob2 = j; return j } }
     function call(n,a){ return { "function": { "name": n, "arguments": a || {} } } }
 
     TestCase {
@@ -37,7 +44,10 @@ Item {
         function init(){ ctl.chatModel.clear(); storeMock.appended = []; storeMock._n = 0
                          ctl.conversationId = "c1"; ctl._messages = []; registryMock.perm = {}
                          registryMock.cat = {}; registryMock.execLog = []; realGrants.clearConversation("c1")
-                         ctl.state = "idle"; ctl._activeJob = null }
+                         ctl.state = "idle"; ctl._activeJob = null
+                         ctlOhneResolver.chatModel.clear(); ctlOhneResolver._messages = []
+                         ctlOhneResolver.conversationId = "c1"
+                         ctlOhneResolver.state = "idle"; ctlOhneResolver._activeJob = null; lastJob2 = null }
 
         function test_confirmToolWaitsThenRunsOnYes() {
             registryMock.perm = { "run_command": "confirm" }
@@ -89,6 +99,44 @@ Item {
             ctl.confirmOnce()
             compare(registryMock.execLog.length, 2)
             lastJob.done({ content:"ok", thinking:"", toolCalls:[] })
+        }
+
+        // Audit-Fix (Klein/ux): ein ABGELEHNTES Tool lief nie — es darf die
+        // Kategorie-Policy nicht fuettern (noteResult nur fuer tatsaechlich
+        // ausgefuehrte Tools). Sonst eskaliert das naechste Tool der anderen
+        // Kategorie grundlos auf confirm.
+        function test_abgelehntesToolEskaliertKeinenKategorieWechsel() {
+            registryMock.perm = { "web_search": "confirm", "read_file": "auto" }
+            registryMock.cat = { "web_search": "network", "read_file": "local" }
+            ctl.send("erst web (abgelehnt), dann datei", null)
+            lastJob.done({ content:"", thinking:"", toolCalls:[ call("web_search", { query:"x" }) ] })
+            compare(ctl.state, "toolPending")
+            ctl.reject()
+            compare(registryMock.execLog.length, 0)         // web_search lief NIE
+            // read_file (auto, local) muss jetzt DIREKT laufen — kein
+            // Kategorie-Wechsel-Confirm durch das verworfene network-Tool.
+            lastJob.done({ content:"", thinking:"", toolCalls:[ call("read_file", { path:"/x" }) ] })
+            compare(ctl.state !== "toolPending", true)
+            compare(registryMock.execLog.length, 1)
+            compare(registryMock.execLog[0], "read_file")
+            lastJob.done({ content:"ok", thinking:"", toolCalls:[] })
+            compare(ctl.state, "idle")
+        }
+
+        // Audit-Fix (Klein/null-safety): _decide ohne injizierten Resolver darf
+        // nicht werfen (Throw im Handler -> State klemmt in toolRunning).
+        // Definiertes Verhalten: konservativ "confirm" — ohne Resolver laeuft
+        // kein Tool (auch kein auto-Tool) still durch.
+        function test_decideOhneResolverFragtKonservativNach() {
+            registryMock.perm = { "read_file": "auto" }
+            ctlOhneResolver.send("lies", null)
+            lastJob2.done({ content:"", thinking:"", toolCalls:[ call("read_file", { path:"/x" }) ] })
+            compare(ctlOhneResolver.state, "toolPending")   // kein Throw, kein Klemmen
+            compare(registryMock.execLog.length, 0)
+            ctlOhneResolver.confirmOnce()                   // Nutzer bestaetigt -> normal weiter
+            compare(registryMock.execLog.length, 1)
+            lastJob2.done({ content:"ok", thinking:"", toolCalls:[] })
+            compare(ctlOhneResolver.state, "idle")
         }
     }
 }

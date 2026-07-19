@@ -23,6 +23,13 @@ Item {
     QtObject { id: mmMock; property string activeModel: "m"; property var activeCaps: ["tools"]
         property bool isRemote: false; property string selectedModel: "m"
         function selectModel(v){ selectedModel = v } }
+    // Grants-Mocks fuer den deleteConversation-Audit-Fix: einer MIT Zaehler,
+    // einer bewusst OHNE clearConversation (Feature-Detect muss greifen)
+    QtObject { id: grantsMock; property var cleared: []
+        function grant(c, t) {} function hasGrant(c, t) { return false }
+        function clearConversation(id) { cleared.push(id) } }
+    QtObject { id: slimGrants
+        function grant(c, t) {} function hasGrant(c, t) { return false } }
 
     property var lastJob: null
     AuroraEngine {
@@ -48,6 +55,21 @@ Item {
             var list = engine.listConversations()
             compare(list.length, 1)
             compare(list[0].id, "c1")
+        }
+        // Audit-Fix (Klein/resource-leak): Per-Konversation-Grants werden beim
+        // Loeschen der Konversation mit aufgeraeumt (feature-detektiert, damit
+        // schlanke Mocks ohne clearConversation gruen bleiben).
+        function test_deleteConversationCleartGrants() {
+            var orig = engine.grants
+            engine.grants = grantsMock
+            grantsMock.cleared = []
+            engine.deleteConversation("c-del")
+            compare(grantsMock.cleared.length, 1)
+            compare(grantsMock.cleared[0], "c-del")
+            // schlanker Mock OHNE clearConversation: kein Throw
+            engine.grants = slimGrants
+            engine.deleteConversation("c-del2")
+            engine.grants = orig
         }
         function test_modelApiDelegates() {
             engine.selectModel("qwen3.5:9b")

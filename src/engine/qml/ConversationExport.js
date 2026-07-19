@@ -7,8 +7,21 @@ function _slug(title) {
     return s
 }
 
+// djb2 über den UTF-16-Code-Einheiten, 6 hex Stellen: billiger, stabiler
+// Titel-Fingerabdruck für Dateinamen (kein Krypto-Anspruch, nur Kollisions-
+// Vermeidung, wenn der Slug leer ausgeht).
+function _hash(s) {
+    var h = 5381
+    for (var i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) >>> 0
+    return ("000000" + h.toString(16)).slice(-6)
+}
+
 function filename(title, timestamp) {
     var slug = _slug(title)
+    // Nicht-lateinische Titel (kyrillisch, CJK, ...) sluggen zu "" — statt der
+    // Kollision auf "aurora-<ts>.md" bei zwei Exporten im selben Sekundentakt
+    // den stabilen Titel-Hash anhängen. Leerer Titel bleibt bewusst generisch.
+    if (slug === "" && title && String(title) !== "") slug = "aurora-" + _hash(String(title))
     return (slug === "" ? "aurora" : slug) + "-" + timestamp + ".md"
 }
 

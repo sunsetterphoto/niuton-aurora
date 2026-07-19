@@ -38,6 +38,13 @@ public:
     Q_INVOKABLE QVariantList goodExamples() const;
     Q_INVOKABLE QString questionForAnswer(const QString &assistantId) const;
     Q_INVOKABLE QVariantList knowledgeEntries() const;
+    // Ähnlichkeitssuche (Wissensbasis Scheibe C): Brute-Force-Cosinus des Query-
+    // Vektors gegen alle gespeicherten Vektoren des gegebenen embedModel — bewertete
+    // Antworten (NUR rating=1, nie bloße Vektor-Präsenz: Orphan-Immunität) UND
+    // knowledge-Einträge. Treffer ab minScore (NaN/negativ -> 0), absteigend,
+    // max. topK (0..20, 0 = leer).
+    Q_INVOKABLE QVariantList searchSimilar(const QVariantList &queryVec, const QString &embedModel,
+                                           int topK, double minScore) const;
 
     // Writes (asynchron)
     Q_INVOKABLE void createConversation(const QString &id, const QString &title);
@@ -59,6 +66,10 @@ public:
 Q_SIGNALS:
     void readyChanged();
     void writeFailed(const QString &op, const QString &error);
+    // SQL-Fehler in den synchronen Reads (z. B. corrupt/locked DB): statt still
+    // leere Ergebnisse zu liefern — op = Name der Lese-Methode. Die QML-
+    // Verdrahtung obliegt dem Aufrufer; Rückgabewerte bleiben im Fehlerfall leer.
+    void readFailed(const QString &op, const QString &error);
     void writeCompleted(const QString &op);
     // intern: Auftrag an den Worker (queued über die Thread-Grenze)
     void opRequested(const QString &op, const QVariantMap &args);

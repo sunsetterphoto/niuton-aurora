@@ -36,6 +36,9 @@ const QVariantMap &ConfigStore::defaults()
         { QStringLiteral("searchEndpoint"),         QStringLiteral("http://127.0.0.1:8888") },
         { QStringLiteral("modelParams"),            QStringLiteral("{}") },
         { QStringLiteral("embedModel"),             QStringLiteral("nomic-embed-text") },
+        { QStringLiteral("ragEnabled"),             true },
+        { QStringLiteral("ragTopK"),                3 },
+        { QStringLiteral("ragThreshold"),           0.75 },
     };
     return d;
 }
@@ -125,8 +128,10 @@ QVariant ConfigStore::value(const QString &key) const
     QVariant v = m_settings.value(key, def);
     // QSettings(IniFormat) liefert cross-process QString; auf den Schema-Typ
     // konvertieren, damit QML bool/int typrichtig sieht (nur bei bekanntem Key).
-    if (def.isValid() && v.metaType() != def.metaType())
-        v.convert(def.metaType());
+    // Schlägt die Konvertierung fehl (korrupter/hand-editierter Wert), gilt der
+    // Schema-Default — nicht die Typ-Null (toolMaxRounds->0 waere fatal).
+    if (def.isValid() && v.metaType() != def.metaType() && !v.convert(def.metaType()))
+        v = def;
     return v;
 }
 

@@ -45,6 +45,7 @@ QtObject {
     property int _remoteWinnerIndex: -1
     property int _probeEpoch: 0            // verwirft späte Antworten alter Proben
     property int _probePending: 0          // noch offene Antworten der aktuellen Epoche (Task 3)
+    property string _loadingModel: ""      // Modell des laufenden Preloads (Audit-Fix Doppel-Preload)
 
     property Timer _profileTimer: Timer {
         interval: 30000
@@ -274,9 +275,16 @@ QtObject {
     }
 
     function _preloadActive() {
+        // Audit-Fix (Klein/perf): der 30-s-Profil-Timer feuert auch, waehrend
+        // ein Preload noch laeuft — fuer DASSELBE Modell keinen zweiten
+        // parallelen Request starten. Ein echter Wechsel (anderes activeModel)
+        // startet sehr wohl neu; der stale Callback des alten Modells wird im
+        // Callback unten verworfen (m !== activeModel).
+        if (modelLoading && _loadingModel === activeModel) return
         modelLoading = true
         modelLoaded = false
         var m = activeModel
+        _loadingModel = m
         activeClient().preload(m, function(ok) {
             if (m !== mgr.activeModel) return   // inzwischen umgeschaltet
             mgr.modelLoading = false

@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="package/contents/icons/aurora.png" alt="Aurora logo" width="128">
+</p>
+
 # Aurora
 
 **Local-first AI assistant for KDE Plasma 6** — available both as a panel widget and a

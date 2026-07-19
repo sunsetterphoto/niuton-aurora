@@ -236,5 +236,29 @@ Item {
             compare(controller.manualEntries.length, 0)   // Store nicht offen -> leer
             compare(controller.goodExamples.length, 0)    // Store nicht offen -> leer
         }
+
+        // Konversations-Suche (FTS5): Controller-Mapping + <2-Zeichen-Guard gegen
+        // die echte Store-Test-DB (AURORA_DB_PATH via CMake gesetzt).
+        SignalSpy { id: writeSpy; target: ConversationStore; signalName: "writeCompleted" }
+
+        function test_searchConversations_mappingUndGuard() {
+            verify(ConversationStore.open().ok)
+            // Eindeutiges Token pro Lauf: die Test-DB (AURORA_DB_PATH) akkumuliert
+            // Zeilen über Suite-Läufe — mit festem Begriff wäre size() fragil.
+            var token = "Kalamari" + Date.now()
+            var cid = ConversationStore.newUuid()
+            ConversationStore.appendMessage({ "conversationId": cid, "role": "user",
+                                              "content": "Schalentier " + token })
+            writeSpy.wait(2000)                          // async Worker-Write abwarten
+            controller.searchConversations(token)
+            compare(controller.searchResults.length, 1)
+            var hit = controller.searchResults[0]
+            compare(hit.id, cid)
+            compare(hit.title, "Neue Konversation")      // Fallback bei leerem Titel
+            verify(hit.snippet.length > 0)
+            // <2 Zeichen -> keine Suche, Ergebnis leer
+            controller.searchConversations("K")
+            compare(controller.searchResults.length, 0)
+        }
     }
 }

@@ -5,6 +5,8 @@
 #include <QFileInfo>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QRegularExpression>
+#include <QSet>
 #include <QSqlDatabase>
 #include <QSqlError>
 #include <QSqlQuery>
@@ -108,6 +110,29 @@ double cosineScore(const QVector<float> &q, double qNorm, const QByteArray &blob
     return dot / (qNorm * std::sqrt(cNorm));
 }
 
+// Schlichter Snippet-Bau für die Konversations-Suche: Fenster um den ersten
+// (frühesten) Wort-Treffer, Zeilenumbrüche geglättet, Ellipsen an den Schnitten.
+// (snippet() von FTS5 scheidet hier aus: auf External-Content-Tabellen wirft es
+// im JOIN-Kontext "unable to use function snippet in the requested context".)
+QString makeSnippet(const QString &content, const QStringList &words)
+{
+    const QString flat = QString(content).replace(QLatin1Char('\n'), QLatin1Char(' '));
+    int pos = -1;
+    for (const QString &w : words) {
+        const int p = flat.indexOf(w, 0, Qt::CaseInsensitive);
+        if (p >= 0 && (pos < 0 || p < pos))
+            pos = p;
+    }
+    const int window = 120;
+    if (pos < 0)
+        return flat.left(window) + (flat.size() > window ? QStringLiteral("…") : QString());
+    const int start = qMax(0, pos - 30);
+    QString s = (start > 0 ? QStringLiteral("…") : QString()) + flat.mid(start, window);
+    if (start + window < flat.size())
+        s += QStringLiteral("…");
+    return s;
+}
+
 // Migrationsschritte, je in einer Transaktion (PRAGMA user_version).
 // BEGIN IMMEDIATE + Versions-Check IN der Transaktion: zwei Prozesse, die
 // gleichzeitig zum ersten Mal öffnen (Widget + spätere App), serialisieren
@@ -125,8 +150,8 @@ bool migrate(QSqlDatabase &db, QString *error)
         return false;
     }
     const int version = q.value(0).toInt();
-    if (version > 4) {
-        if (error) *error = QStringLiteral("Datenbank hat Schema-Version %1 — diese Aurora-Version kennt nur 4 (DB von neuerer Version?)").arg(version);
+    if (version > 5) {
+        if (error) *error = QStringLiteral("Datenbank hat Schema-Version %1 — diese Aurora-Version kennt nur 5 (DB von neuerer Version?)").arg(version);
         q.exec(QStringLiteral("ROLLBACK"));
         return false;
     }
@@ -242,6 +267,45 @@ bool migrate(QSqlDatabase &db, QString *error)
             QStringLiteral("PRAGMA user_version = 4"),
         };
         for (const QString &stmt : ddlV4) {
+            if (!q.exec(stmt)) {
+                if (error) *error = q.lastError().text();
+                q.exec(QStringLiteral("ROLLBACK"));
+                return false;
+            }
+        }
+    }
+
+    // Migration 4 -> 5: FTS5-Volltextindex über user/assistant-Inhalte
+    // (Konversations-Suche). External-Content-Tabelle auf messages.rowid +
+    // drei Sync-Trigger (alle Writes laufen über diesen Store, der Index folgt
+    // so automatisch) + einmaliger Backfill. Tool-Inhalte bleiben bewusst
+    // außen vor (würden Index und Treffer verwässern).
+    if (version < 5) {
+        const QStringList ddlV5 = {
+            QStringLiteral(
+                "CREATE VIRTUAL TABLE messages_fts USING fts5("
+                " content, content='messages', content_rowid='rowid')"),
+            QStringLiteral(
+                "CREATE TRIGGER messages_fts_ai AFTER INSERT ON messages"
+                " WHEN new.role IN ('user','assistant') BEGIN"
+                " INSERT INTO messages_fts(rowid, content) VALUES (new.rowid, new.content); END"),
+            QStringLiteral(
+                "CREATE TRIGGER messages_fts_ad AFTER DELETE ON messages"
+                " WHEN old.role IN ('user','assistant') BEGIN"
+                " INSERT INTO messages_fts(messages_fts, rowid, content)"
+                " VALUES('delete', old.rowid, old.content); END"),
+            QStringLiteral(
+                "CREATE TRIGGER messages_fts_au AFTER UPDATE ON messages"
+                " WHEN old.role IN ('user','assistant') BEGIN"
+                " INSERT INTO messages_fts(messages_fts, rowid, content)"
+                " VALUES('delete', old.rowid, old.content);"
+                " INSERT INTO messages_fts(rowid, content) VALUES (new.rowid, new.content); END"),
+            QStringLiteral(
+                "INSERT INTO messages_fts(rowid, content)"
+                " SELECT rowid, content FROM messages WHERE role IN ('user','assistant')"),
+            QStringLiteral("PRAGMA user_version = 5"),
+        };
+        for (const QString &stmt : ddlV5) {
             if (!q.exec(stmt)) {
                 if (error) *error = q.lastError().text();
                 q.exec(QStringLiteral("ROLLBACK"));
@@ -1043,6 +1107,123 @@ QVariantList ConversationStore::searchSimilar(const QVariantList &queryVec, cons
               });
     for (int i = 0; i < hits.size() && i < k; ++i)
         out.append(hits.at(i).second);
+    return out;
+}
+
+QVariantList ConversationStore::searchConversations(const QString &text, int limit) const
+{
+    QVariantList out;
+    if (!m_ready)
+        return out;
+    const QString trimmed = text.trimmed();
+    if (trimmed.isEmpty())
+        return out;
+    const int k = qBound(1, limit, 100);
+
+    // FTS-MATCH-String: jedes Wort einzeln in Anführungszeichen mit Präfix-*
+    // (AND-Semantik der Wörter, Präfix je Wort — „rhab" findet „Rhabarberkompott",
+    // Type-ahead-Üblichkeit). Quoting macht FTS-Operatoren/Sonderzeichen inert.
+    // Wörter aus reinen Satzzeichen (z. B. "%") erzeugen beim FTS-Tokenizer
+    // leere Phrasen (Syntaxfehler) — sie werden vorweg verworfen.
+    const QStringList words = trimmed.split(QRegularExpression(QStringLiteral("\\s+")),
+                                            Qt::SkipEmptyParts);
+    QStringList quoted;
+    for (const QString &w : words) {
+        if (!w.contains(QRegularExpression(QStringLiteral("\\w"))))
+            continue;
+        quoted << QStringLiteral("\"") + QString(w).replace(QStringLiteral("\""),
+                                                            QStringLiteral("\"\""))
+               + QStringLiteral("\"*");
+    }
+    if (quoted.isEmpty())
+        return out;
+    const QString matchStr = quoted.join(QLatin1Char(' '));
+
+    // LIKE-Muster fuer den Titel: %/_/\ escapen (ESCAPE '\').
+    QString like = trimmed;
+    like.replace(QStringLiteral("\\"), QStringLiteral("\\\\"))
+        .replace(QStringLiteral("%"), QStringLiteral("\\%"))
+        .replace(QStringLiteral("_"), QStringLiteral("\\_"));
+    like = QStringLiteral("%") + like + QStringLiteral("%");
+
+    QSet<QString> seen;
+    QList<QVariantMap> merged;
+
+    // Titel-Treffer zuerst (LIKE auf conversations.title)
+    {
+        QSqlQuery q(QSqlDatabase::database(m_readConn));
+        q.prepare(QStringLiteral(
+            "SELECT id, title, created_at, updated_at FROM conversations"
+            " WHERE title LIKE :like ESCAPE '\\'"));
+        q.bindValue(QStringLiteral(":like"), like);
+        if (!q.exec()) {
+            Q_EMIT const_cast<ConversationStore *>(this)->readFailed(
+                QStringLiteral("searchConversations"), q.lastError().text());
+            return out;
+        }
+        while (q.next()) {
+            const QString id = q.value(0).toString();
+            if (seen.contains(id))
+                continue;
+            seen.insert(id);
+            merged.append(QVariantMap{
+                {QStringLiteral("id"), id},
+                {QStringLiteral("title"), q.value(1).toString()},
+                {QStringLiteral("createdAt"), q.value(2).toString()},
+                {QStringLiteral("updatedAt"), q.value(3).toString()},
+                {QStringLiteral("snippet"), QString()},
+                {QStringLiteral("titleMatch"), true},
+            });
+        }
+    }
+
+    // Inhalts-Treffer (FTS5 auf user/assistant). Zweistufig: MATCH liefert die
+    // Zeilen (JOIN auf conversation_id/content), das Snippet baut C++ daraus.
+    // Dedup pro Konversation (erste — älteste — Trefferzeile gewinnt).
+    {
+        QSqlQuery q(QSqlDatabase::database(m_readConn));
+        q.prepare(QStringLiteral(
+            "SELECT m.conversation_id, m.content"
+            " FROM messages_fts JOIN messages m ON m.rowid = messages_fts.rowid"
+            " WHERE messages_fts MATCH :m"
+            " ORDER BY messages_fts.rowid LIMIT :n"));
+        q.bindValue(QStringLiteral(":m"), matchStr);
+        q.bindValue(QStringLiteral(":n"), k * 5);
+        if (!q.exec()) {
+            Q_EMIT const_cast<ConversationStore *>(this)->readFailed(
+                QStringLiteral("searchConversations"), q.lastError().text());
+            return out;
+        }
+        QSqlQuery hydra(QSqlDatabase::database(m_readConn));
+        hydra.prepare(QStringLiteral(
+            "SELECT title, created_at, updated_at FROM conversations WHERE id = :id"));
+        while (q.next()) {
+            const QString id = q.value(0).toString();
+            if (seen.contains(id))
+                continue;
+            seen.insert(id);
+            hydra.bindValue(QStringLiteral(":id"), id);
+            if (!hydra.exec() || !hydra.next())
+                continue;   // verwaiste Konversation: überspringen
+            merged.append(QVariantMap{
+                {QStringLiteral("id"), id},
+                {QStringLiteral("title"), hydra.value(0).toString()},
+                {QStringLiteral("createdAt"), hydra.value(1).toString()},
+                {QStringLiteral("updatedAt"), hydra.value(2).toString()},
+                {QStringLiteral("snippet"), makeSnippet(q.value(1).toString(), words)},
+                {QStringLiteral("titleMatch"), false},
+            });
+        }
+    }
+
+    // Neueste Aktivität zuerst (ISO-Strings sortieren lexikografisch = chronologisch)
+    std::sort(merged.begin(), merged.end(),
+              [](const QVariantMap &a, const QVariantMap &b) {
+                  return a.value(QStringLiteral("updatedAt")).toString()
+                       > b.value(QStringLiteral("updatedAt")).toString();
+              });
+    for (int i = 0; i < merged.size() && i < k; ++i)
+        out.append(merged.at(i));
     return out;
 }
 

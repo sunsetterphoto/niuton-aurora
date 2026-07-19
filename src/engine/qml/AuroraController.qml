@@ -75,6 +75,9 @@ QtObject {
 
     // ==================== Konversationsliste (Sidebar-Modell) ====================
     property var conversationList: []
+    // Treffer der Konversations-Suche (FTS5 über Titel+Inhalte; Einträge wie
+    // conversationList + snippet). Leer, wenn kein aktiver Suchtext (>= 2 Zeichen).
+    property var searchResults: []
 
     // ==================== Wissensbasis (bewertete Antworten + manuelle Einträge) ====================
     property var goodExamples: []
@@ -387,6 +390,18 @@ QtObject {
         conversationList = engine.listConversations().map(function(c) {
             return { "id": c.id, "title": c.title !== "" ? c.title : "Neue Konversation",
                 "created_at": c.createdAt, "updated_at": c.updatedAt }
+        })
+    }
+
+    // Konversations-Suche (FTS5 im Store): Titel + user/assistant-Inhalte,
+    // AND/Präfix je Wort. Unter 2 Zeichen keine Suche (Ergebnis leeren).
+    function searchConversations(text) {
+        var q = (text || "").trim()
+        if (q.length < 2) { searchResults = []; return }
+        searchResults = ConversationStore.searchConversations(q, 50).map(function(c) {
+            return { "id": c.id, "title": c.title !== "" ? c.title : "Neue Konversation",
+                "created_at": c.createdAt, "updated_at": c.updatedAt,
+                "snippet": c.snippet || "" }
         })
     }
 

@@ -10,10 +10,15 @@ Rectangle {
     property var conversations: []
     property string currentId: ""
     property bool canNewChat: false
+    // Treffer-Modell der Konversations-Suche (Host füllt es via searchRequested;
+    // Einträge wie conversations + snippet). searching steuert die Listenquelle.
+    property var searchResults: []
+    readonly property bool searching: searchField.text.trim().length >= 2
 
     signal newChatRequested()
     signal loadRequested(string convId)
     signal deleteRequested(string convId)
+    signal searchRequested(string text)
 
     // Löschen-Bestätigung: id der Zeile, die auf den zweiten (bestätigenden)
     // Klick wartet. "" = keine Zeile bestätigungsbereit. Zurückgesetzt beim
@@ -54,13 +59,49 @@ Rectangle {
             }
         }
 
+        // Konversations-Suche (FTS5 im Store): Titel + Inhalte, Debounce gegen
+        // Suchläufe pro Tastenschlag. Der Host beantwortet searchRequested und
+        // füllt searchResults; ab 2 Zeichen wird das Treffer-Modell gezeigt.
+        QQC2.TextField {
+            id: searchField
+            Layout.fillWidth: true
+            placeholderText: "Suchen …"
+            rightPadding: clearSearch.width
+            onTextChanged: searchDebounce.restart()
+
+            QQC2.ToolButton {
+                id: clearSearch
+                anchors.right: parent.right
+                anchors.verticalCenter: parent.verticalCenter
+                icon.name: "edit-clear"
+                display: QQC2.AbstractButton.IconOnly
+                visible: searchField.text !== ""
+                onClicked: searchField.text = ""
+            }
+
+            Timer {
+                id: searchDebounce
+                interval: 300
+                repeat: false
+                onTriggered: sidebar.searchRequested(searchField.text)
+            }
+        }
+
         Kirigami.Separator { Layout.fillWidth: true }
+
+        QQC2.Label {
+            Layout.fillWidth: true
+            visible: sidebar.searching && sidebar.searchResults.length === 0
+            text: "Keine Treffer"
+            font.italic: true
+            opacity: 0.5
+        }
 
         ListView {
             id: convListView
             Layout.fillWidth: true
             Layout.fillHeight: true
-            model: sidebar.conversations
+            model: sidebar.searching ? sidebar.searchResults : sidebar.conversations
             clip: true
             spacing: 2
 
@@ -104,6 +145,21 @@ Rectangle {
                             // (z. B. falls updated_at mal fehlt).
                             text: sidebar._prettyDate(modelData.updated_at || modelData.created_at)
                             font.pointSize: Kirigami.Theme.smallFont.pointSize - 1
+                            opacity: 0.5
+                            color: modelData.id === sidebar.currentId
+                                ? Kirigami.Theme.highlightedTextColor
+                                : Kirigami.Theme.textColor
+                        }
+
+                        // Snippet-Zeile: nur bei Inhalts-Treffern der Suche belegt
+                        // (Titel-Treffer und die normale Liste haben kein snippet).
+                        QQC2.Label {
+                            Layout.fillWidth: true
+                            visible: text !== ""
+                            text: modelData.snippet || ""
+                            elide: Text.ElideRight
+                            font.pointSize: Kirigami.Theme.smallFont.pointSize - 1
+                            font.italic: true
                             opacity: 0.5
                             color: modelData.id === sidebar.currentId
                                 ? Kirigami.Theme.highlightedTextColor

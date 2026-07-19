@@ -52,7 +52,7 @@ private Q_SLOTS:
             QSqlQuery q(db);
             QVERIFY(q.exec("PRAGMA user_version"));
             QVERIFY(q.next());
-            QCOMPARE(q.value(0).toInt(), 4);
+            QCOMPARE(q.value(0).toInt(), 5);
             QVERIFY(q.exec("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name"));
             QStringList tables;
             while (q.next()) tables << q.value(0).toString();
@@ -60,6 +60,7 @@ private Q_SLOTS:
             QVERIFY(tables.contains("messages"));
             QVERIFY(tables.contains("tool_calls"));
             QVERIFY(tables.contains("knowledge"));
+            QVERIFY(tables.contains("messages_fts"));   // Schema v5: Volltextindex
             db.close();
         }
         QSqlDatabase::removeDatabase("schemacheck");
@@ -815,6 +816,118 @@ private Q_SLOTS:
         QCOMPARE(failed.count(), 9);
         QCOMPARE(failed.first().at(0).toString(), QString("listConversations"));
         QVERIFY(!failed.first().at(1).toString().isEmpty());
+    }
+
+    // Konversations-Suche (Schema v5, FTS5): Titel-LIKE + Inhalts-MATCH,
+    // Trigger-Sync bei insert/update/delete, Rollen-Filter, AND-Semantik.
+    void suche_findetInhaltUndTitel_triggerSync()
+    {
+        StoreFixture f;
+        QVERIFY(f.store->open().value("ok").toBool());
+        QSignalSpy done(f.store, &ConversationStore::writeCompleted);
+        const QString cid1 = f.store->newUuid();
+        f.store->createConversation(cid1, "Fedora Kernel Update");
+        const QString cid2 = f.store->newUuid();
+        const QString aid = f.store->newUuid();
+        f.store->appendMessage({{"conversationId", cid2}, {"role", "user"}, {"content", "Wie boote ich ins BIOS?"}});
+        f.store->appendMessage({{"id", aid}, {"conversationId", cid2}, {"role", "assistant"}, {"content", "Druecke F2 oder Entf beim Start."}});
+        f.store->appendMessage({{"conversationId", cid2}, {"role", "tool"}, {"toolName", "web_search"}, {"content", "Geheimwort Xylophon"}});
+        QTRY_COMPARE(done.count(), 4);
+
+        // Inhalts-Treffer mit Snippet
+        QVariantList hits = f.store->searchConversations("BIOS", 10);
+        QCOMPARE(hits.size(), 1);
+        QCOMPARE(hits.first().toMap().value("id").toString(), cid2);
+        QCOMPARE(hits.first().toMap().value("titleMatch").toBool(), false);
+        QVERIFY(!hits.first().toMap().value("snippet").toString().isEmpty());
+
+        // Titel-Treffer (Snippet leer, titleMatch true)
+        hits = f.store->searchConversations("Kernel", 10);
+        QCOMPARE(hits.size(), 1);
+        QCOMPARE(hits.first().toMap().value("id").toString(), cid1);
+        QCOMPARE(hits.first().toMap().value("titleMatch").toBool(), true);
+        QCOMPARE(hits.first().toMap().value("snippet").toString(), QString());
+
+        // AND-Semantik: beide Woerter muessen vorkommen
+        QCOMPARE(f.store->searchConversations("BIOS Kernel", 10).size(), 0);
+
+        // tool-Inhalt ist NICHT indexiert
+        QCOMPARE(f.store->searchConversations("Xylophon", 10).size(), 0);
+
+        // Update-Sync: neuer Inhalt trifft, alter nicht mehr
+        f.store->updateMessage(aid, {{"content", "Neuer Inhalt Quatschwort"}});
+        QTRY_COMPARE(done.count(), 5);
+        QCOMPARE(f.store->searchConversations("Quatschwort", 10).size(), 1);
+        QCOMPARE(f.store->searchConversations("Entf", 10).size(), 0);
+
+        // Delete-Sync
+        f.store->deleteMessage(aid);
+        QTRY_COMPARE(done.count(), 6);
+        QCOMPARE(f.store->searchConversations("Quatschwort", 10).size(), 0);
+    }
+
+    void suche_sonderzeichenUndLeer_undVorOpen()
+    {
+        StoreFixture f;
+        // vor open(): leer, kein Absturz
+        QCOMPARE(f.store->searchConversations("x", 10).size(), 0);
+        QVERIFY(f.store->open().value("ok").toBool());
+        QSignalSpy done(f.store, &ConversationStore::writeCompleted);
+        const QString cid = f.store->newUuid();
+        f.store->appendMessage({{"conversationId", cid}, {"role", "user"}, {"content", "prozent % und _ unterstrich"}});
+        QTRY_COMPARE(done.count(), 1);
+
+        // leer/whitespace -> leer
+        QCOMPARE(f.store->searchConversations("", 10).size(), 0);
+        QCOMPARE(f.store->searchConversations("   ", 10).size(), 0);
+        // nur Satzzeichen -> leer (leere FTS-Phrasen werden vorweg verworfen)
+        QCOMPARE(f.store->searchConversations("% ( ) \"", 10).size(), 0);
+        // FTS-Operatoren als Woerter sind inert (gequotet) -> kein Fehler
+        QCOMPARE(f.store->searchConversations("\" AND ( OR )", 10).size(), 0);
+        // % im Wort (LIKE-Escape + FTS-Quote) trifft korrekt
+        QCOMPARE(f.store->searchConversations("prozent %", 10).size(), 1);
+    }
+
+    // Migration 4 -> 5 mit Bestandsdaten: FTS-Objekte weg + user_version=4 ist
+    // exakt eine v4-DB (v5 ist rein additiv) -> open() muss migrieren und
+    // bestehende Inhalte per Backfill suchbar machen.
+    void suche_migrationV4aufV5_mitBestandsdaten()
+    {
+        QTemporaryDir dir;
+        qputenv("AURORA_DB_PATH", (dir.path() + "/test.db").toUtf8());
+        QString dbPath;
+        {
+            ConversationStore store;
+            QVERIFY(store.open().value("ok").toBool());
+            dbPath = store.dbPath();
+            QSignalSpy done(&store, &ConversationStore::writeCompleted);
+            const QString cid = store.newUuid();
+            store.appendMessage({{"conversationId", cid}, {"role", "user"}, {"content", "Rhabarberkompott"}});
+            QTRY_COMPARE(done.count(), 1);
+        }   // Dtor: Worker-Drain + Verbindungen zu
+
+        {
+            QSqlDatabase db = QSqlDatabase::addDatabase("QSQLITE", "downgrade");
+            db.setDatabaseName(dbPath);
+            QVERIFY(db.open());
+            QSqlQuery q(db);
+            QVERIFY(q.exec("DROP TRIGGER messages_fts_ai"));
+            QVERIFY(q.exec("DROP TRIGGER messages_fts_ad"));
+            QVERIFY(q.exec("DROP TRIGGER messages_fts_au"));
+            QVERIFY(q.exec("DROP TABLE messages_fts"));
+            QVERIFY(q.exec("PRAGMA user_version = 4"));
+            db.close();
+        }
+        QSqlDatabase::removeDatabase("downgrade");
+
+        {
+            ConversationStore store;
+            QVERIFY(store.open().value("ok").toBool());
+            const QVariantList hits = store.searchConversations("Rhabarber", 10);
+            QCOMPARE(hits.size(), 1);
+            QCOMPARE(hits.first().toMap().value("titleMatch").toBool(), false);
+        }
+        qunsetenv("AURORA_DB_PATH");
     }
 };
 

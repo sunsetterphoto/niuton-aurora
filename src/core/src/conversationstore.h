@@ -45,6 +45,10 @@ public:
     // max. topK (0..20, 0 = leer).
     Q_INVOKABLE QVariantList searchSimilar(const QVariantList &queryVec, const QString &embedModel,
                                            int topK, double minScore) const;
+    // Volltextsuche (FTS5, Schema v5) über Titel (LIKE) UND user/assistant-Inhalte
+    // (FTS-MATCH, AND-Semantik je Wort). Einträge: {id, title, createdAt, updatedAt,
+    // snippet, titleMatch} — snippet leer bei Titel-Treffern, sonst Textauszug.
+    Q_INVOKABLE QVariantList searchConversations(const QString &text, int limit = 50) const;
 
     // Writes (asynchron)
     Q_INVOKABLE void createConversation(const QString &id, const QString &title);

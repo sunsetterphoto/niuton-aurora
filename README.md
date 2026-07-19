@@ -23,7 +23,8 @@ processing.
 - **Image generation** via [ComfyUI](https://github.com/comfyanonymous/ComfyUI) (semantic workflow
   templates), from a chat tool or a dedicated image panel.
 - **Voice**: speech-to-text via whisper.cpp and text-to-speech via [Piper](https://github.com/rhasspy/piper).
-- **Conversation history** in SQLite, plus a **knowledge base with RAG**: thumbs-up rated
+- **Conversation history** in SQLite with **full-text search** (FTS5 over titles and
+  message contents, with result snippets), plus a **knowledge base with RAG**: thumbs-up rated
   answers and manually curated entries (links / notes / facts) are embedded; on similar new
   questions the best matches are retrieved into the system prompt, with per-answer source
   attribution (configurable: on/off, top-k, similarity threshold).

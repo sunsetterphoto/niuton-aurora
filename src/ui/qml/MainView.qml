@@ -75,10 +75,12 @@ ColumnLayout {
             conversations: root.controller.conversationList
             currentId: root.controller.conversationId
             canNewChat: true
+            searchResults: root.controller.searchResults
 
             onNewChatRequested: root.controller.newConversation()
             onLoadRequested: function(convId) { root.controller.loadConversation(convId) }
             onDeleteRequested: function(convId) { root.controller.deleteConversation(convId) }
+            onSearchRequested: function(text) { root.controller.searchConversations(text) }
 
             Behavior on Layout.preferredWidth { NumberAnimation { duration: 150 } }
         }

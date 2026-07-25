@@ -53,6 +53,11 @@ TestCase {
     function init() {
         mockHttp.calls = []
         persistSpy.clear()
+        // Sterbenden Manager VOR dem Config-Reset deaktivieren + zerstören
+        // (destroy() ist deferred — ohne active=false reagiert der noch
+        // lebende Manager auf die revisionChanged-Flut des reset() und
+        // setzt Requests in das frische mockHttp.calls des neuen Tests ab).
+        if (mgr) { mgr.active = false; mgr.destroy() }
         // ConfigStore ist ein QML_SINGLETON (nicht pro Testfunktion neu baubar) —
         // reset() ist der Isolations-Hebel (AURORA_CONFIG_PATH zeigt laut
         // CMakeLists auf eine build-lokale, testspezifische Datei). Er setzt
@@ -60,7 +65,6 @@ TestCase {
         // ("auto" bzw. [] durch die revision-Bindung in testSettings) zurück.
         ConfigStore.reset()
         mockFileIO.files = { "/sys/firmware/acpi/platform_profile": "balanced\n" }
-        if (mgr) mgr.destroy()
         mgr = mgrFactory.createObject(this)
     }
 
@@ -399,5 +403,64 @@ TestCase {
         compare(mockHttp.calls[i].body.input, "Frage")
         mockHttp.answer(i, { "ok": true, "data": { "embeddings": [[0.1, 0.2]] } })
         compare(out.length, 2)
+    }
+
+    // Embed-Fallback: aktives Remote liefert null (Modell fehlt dort) →
+    // zweiter Versuch auf dem lokalen Backend, das den Vektor liefert.
+    function test_embedFaelltBeiNullVonRemoteAufLokalZurueck() {
+        ConfigStore.setValue("remoteEndpoint", "http://lan:11434")
+        mgr.refresh()
+        var iProbe = mockHttp.find("http://lan:11434/api/tags")
+        mockHttp.answer(iProbe, _tags(["gross:31b"]))
+        var iRefresh = mockHttp.find("http://lan:11434/api/tags", iProbe + 1)
+        mockHttp.answer(iRefresh, _tags(["gross:31b"]))
+        mockHttp.answer(mockHttp.find("http://lan:11434/api/ps"), { "ok": true, "data": { "models": [] } })
+        mgr.selectModel("remote:gross:31b")
+        mockHttp.answer(mockHttp.find("http://lan:11434/api/chat"), { "ok": true })
+        compare(mgr.isRemote, true)
+
+        var out = "unset"
+        mgr.embed("nomic-embed-text", "Frage", function(v) { out = v })
+        var iRemote = mockHttp.find("http://lan:11434/api/embed")
+        verify(iRemote !== -1)
+        mockHttp.answer(iRemote, { "ok": false, "status": 404, "error": "HTTP 404" })
+        // null vom Remote → Fallback ans lokale Backend
+        var iLocal = mockHttp.find("http://local:11434/api/embed")
+        verify(iLocal !== -1)
+        compare(out, "unset")   // noch nicht final beantwortet
+        mockHttp.answer(iLocal, { "ok": true, "data": { "embeddings": [[0.3, 0.4]] } })
+        compare(out.length, 2)
+    }
+
+    // Ohne zweites nutzbares Backend (remote baseUrl leer) geht null durch.
+    function test_embedNullOhneFallbackBackend() {
+        var out = "unset"
+        mgr.embed("nomic-embed-text", "Frage", function(v) { out = v })
+        var i = mockHttp.find("http://local:11434/api/embed")
+        verify(i !== -1)
+        mockHttp.answer(i, { "ok": false, "status": 404, "error": "HTTP 404" })
+        compare(out, null)
+        // kein Embed-Request an eine leere/ungültige zweite URL
+        for (var c = 0; c < mockHttp.calls.length; c++)
+            verify(mockHttp.calls[c].url.indexOf("/api/embed") === -1 || c === i)
+    }
+    // Live-Sync Modell-Store → Picker: nur ein echter modelsRevision-Wechsel
+    // stößt probeBackends an; beliebige andere Config-Writes nicht.
+    function test_modelsRevisionWechselLoestProbeAus() {
+        mgr.active = true   // Watcher ist active-gegatet (Panel-Widget ist immer aktiv)
+        compare(mockHttp.calls.length, 0)
+        // Irrelevante Config-Änderung: KEINE Probe (Wert-Vergleich)
+        ConfigStore.setValue("ttsVoice", "irgendwas")
+        compare(mockHttp.calls.length, 0)
+        // modelsRevision-Bump → probeBackends → /api/tags auf dem lokalen Backend
+        ConfigStore.setValue("modelsRevision", "2026-07-25T12:00:00")
+        verify(mockHttp.find("http://local:11434/api/tags") !== -1)
+        // Gleicher Wert nochmal: setValue idempotent → kein Bump, keine Probe
+        var n = mockHttp.calls.length
+        ConfigStore.setValue("modelsRevision", "2026-07-25T12:00:00")
+        compare(mockHttp.calls.length, n)
+        // Neuer Wert → erneute Probe
+        ConfigStore.setValue("modelsRevision", "2026-07-25T12:01:00")
+        verify(mockHttp.find("http://local:11434/api/tags", n) !== -1)
     }
 }

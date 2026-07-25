@@ -1,5 +1,6 @@
 import QtQuick
 import QtTest
+import net.niuton.aurora.core
 import net.niuton.aurora.engine
 
 // ModelStore ohne echtes Netz: Mock-Http + Mock-NdjsonStream werden injiziert
@@ -218,6 +219,40 @@ TestCase {
         compare(store.pull("", "qwen3.6:27b"), false)
         compare(store.busy, false)
         compare(store._stream, null)
+    }
+
+    // Store-Bestandsänderungen bumped der ModelStore über den internen Key
+    // "modelsRevision" → ModelManager probt neu (Live-Sync Store→Picker).
+    function test_erfolgreicherPullBumpedModelsRevision() {
+        var vorher = String(ConfigStore.value("modelsRevision") || "")
+        _startPull()
+        lastStream.objectReceived({ "status": "success" })
+        var nachher = String(ConfigStore.value("modelsRevision") || "")
+        verify(nachher !== "")
+        verify(nachher !== vorher)
+    }
+
+    function test_fehlgeschlagenerPullBumpedNicht() {
+        ConfigStore.setValue("modelsRevision", "fixwert")
+        _startPull()
+        lastStream.finished(false, 0, "timeout")
+        compare(String(ConfigStore.value("modelsRevision")), "fixwert")
+    }
+
+    function test_removeErfolgBumped() {
+        ConfigStore.setValue("modelsRevision", "fixwert")
+        var done = false
+        store.remove("http://backend:11434", "x:y", function(o, e) { done = true })
+        verify(done)
+        verify(String(ConfigStore.value("modelsRevision")) !== "fixwert")
+    }
+
+    function test_removeFehlerBumpedNicht() {
+        ConfigStore.setValue("modelsRevision", "fixwert")
+        mockHttp.deleteResult = { "ok": false, "status": 404,
+            "error": "HTTP 404", "data": { "error": "nope" } }
+        store.remove("http://backend:11434", "x:y", function(o, e) {})
+        compare(String(ConfigStore.value("modelsRevision")), "fixwert")
     }
 
     function test_katalogEnthältAngefragteQwen36Modelle() {

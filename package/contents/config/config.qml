@@ -23,6 +23,11 @@ ConfigModel {
         source: "config/ConfigModelStore.qml"
     }
     ConfigCategory {
+        name: "Dienste"
+        icon: "applications-system"
+        source: "config/ConfigServices.qml"
+    }
+    ConfigCategory {
         name: "Sprache"
         icon: "audio-input-microphone"
         source: "config/ConfigVoice.qml"

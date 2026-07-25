@@ -92,8 +92,26 @@
     <entry name="comfyEndpoint" type="String">
       <default></default>
     </entry>
+    <entry name="comfyEndpointLocal" type="String">
+      <default>http://127.0.0.1:8188</default>
+    </entry>
     <entry name="comfyDefaultModel" type="String">
       <default>z_image_turbo</default>
+    </entry>
+  </group>
+
+  <group name="Services">
+    <entry name="speachesEnabled" type="Bool">
+      <default>true</default>
+    </entry>
+    <entry name="speachesEndpoint" type="String">
+      <default>http://127.0.0.1:8000</default>
+    </entry>
+    <entry name="speachesSttModel" type="String">
+      <default>Systran/faster-whisper-large-v3</default>
+    </entry>
+    <entry name="servicesAutoStart" type="Bool">
+      <default>false</default>
     </entry>
   </group>
 

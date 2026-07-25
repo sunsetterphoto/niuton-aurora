@@ -16,6 +16,18 @@ Item {
     readonly property string _piper: FileIO.standardPath("home") + "/.local/bin/piper"
     readonly property string _wav: FileIO.standardPath("cache") + "/aurora-tts.wav"
 
+    // Speaches-Server (lokaler Quadlet): wenn erreichbar, synthetisiert er
+    // (Piper-Stimme als speaches-ai/piper-<voice>, Modell bleibt geladen);
+    // sonst der bisherige piper-Binary-Pfad.
+    property string speachesEndpoint: ""
+    property bool speachesAutoStart: false
+
+    property SpeachesClient _speaches: SpeachesClient {
+        endpoint: speaker.speachesEndpoint
+        autoStart: speaker.speachesAutoStart
+        onAvailableChanged: if (available) speaker.available = true
+    }
+
     // Neuer Text, der auf das (asynchrone) Ende eines noch sterbenden Laufs
     // wartet: terminate() ist SIGTERM, der Runner ist erst nach finished wieder
     // startbar — ohne dieses Parken würde ein schnelles erneutes speak()
@@ -114,10 +126,30 @@ Item {
         if (_pendingText === "" || piperProc.running || aplayProc.running) return
         var text = _pendingText
         _pendingText = ""
+        if (_speaches.available) {
+            _speaches.speak(text, "speaches-ai/piper-" + voice, _voiceShort(), _wav, function(ok, pathOrErr) {
+                if (!speaker.speaking) return   // stop() während der Synthese
+                if (!ok) {
+                    speaker.speaking = false
+                    speaker.errorOccurred("Sprachausgabe fehlgeschlagen: " + pathOrErr)
+                    return
+                }
+                aplayProc.start("aplay", ["-q", speaker._wav])
+            })
+            return
+        }
         piperProc.start(_piper, ["--model", _voiceDir + voice + ".onnx",
                                  "--output_file", _wav])
         piperProc.writeStdin(text)
         piperProc.closeStdin()
+    }
+
+    // Piper-Stimmenname ("de_DE-thorsten-high") -> Speaches-Voice ("thorsten"):
+    // mittlerer Abschnitt ohne Locale-Präfix und Qualitäts-Suffix (empirisch
+    // an /v1/models/<piper-...> verifiziert: voices[].name = "thorsten").
+    function _voiceShort() {
+        var p = voice.split("-")
+        return p.length >= 2 ? p[1] : ""
     }
 
     function stop() {

@@ -115,10 +115,22 @@ QtObject {
     // callback(ok, error)
     function remove(baseUrl, name, callback) {
         http.deleteJson(baseUrl + "/api/delete", { "name": name }, function(res) {
-            if (res.ok) { callback(true, ""); return }
+            if (res.ok) {
+                _bumpModelsRevision()
+                callback(true, "")
+                return
+            }
             var detail = (res.data && res.data.error) ? String(res.data.error) : ""
             callback(false, detail !== "" ? detail : String(res.error || ("HTTP " + res.status)))
         })
+    }
+
+    // Der Backend-Bestand hat sich geändert → internen Bump-Key setzen, damit
+    // Widget/App über ConfigStore.revisionChanged ihre Modelllisten neu proben
+    // (ModelManager._cfgWatch). Interner Schlüssel, kein Nutzer-Setting —
+    // darum bewusst NICHT in defaults()/main.xml.
+    function _bumpModelsRevision() {
+        Core.ConfigStore.setValue("modelsRevision", new Date().toISOString())
     }
 
     function _onPullObject(obj) {
@@ -151,7 +163,10 @@ QtObject {
         _dropStream()
         busy = false
         statusText = ""
-        if (ok) progress = 1
+        if (ok) {
+            progress = 1
+            _bumpModelsRevision()
+        }
         pullFinished(ok, error)
     }
 

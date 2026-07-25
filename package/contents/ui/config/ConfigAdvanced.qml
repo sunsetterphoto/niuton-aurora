@@ -88,9 +88,9 @@ KCM.SimpleKCM {
         QQC2.TextField {
             Kirigami.FormData.label: "Max. Treffer:"
             text: (ConfigStore.revision, String(ConfigStore.value("ragTopK")))
-            // Qt 6.11 hat kein localeName mehr an Validatoren (Seite schlug
-            // damit komplett fehl) — locale: Qt.locale("C") ist der Qt-6-Weg.
-            validator: IntValidator { bottom: 1; top: 10; locale: Qt.locale("C") }
+            // Qt 6.11: localeName existiert nicht mehr an Validatoren (Seite
+            // schlug damit komplett fehl); locale erwartet einen QString.
+            validator: IntValidator { bottom: 1; top: 10; locale: "C" }
             // NaN-Guard (leeres Feld) + Clamp — kein Config-Müll bei ungültiger Eingabe
             onEditingFinished: {
                 var v = parseInt(text)
@@ -103,7 +103,7 @@ KCM.SimpleKCM {
         QQC2.TextField {
             Kirigami.FormData.label: "Ähnlichkeit ab:"
             text: (ConfigStore.revision, String(ConfigStore.value("ragThreshold")))
-            validator: DoubleValidator { bottom: 0.0; top: 1.0; locale: Qt.locale("C") }
+            validator: DoubleValidator { bottom: 0.0; top: 1.0; locale: "C" }
             // deutsches Dezimalkomma normalisieren; NaN-Guard (leeres Feld) + Clamp
             onEditingFinished: {
                 var v = parseFloat(text.replace(",", "."))

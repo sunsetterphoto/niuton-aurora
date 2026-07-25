@@ -121,6 +121,9 @@ QtObject {
         id: voiceRecorder
         language: settings.sttLanguage
         preferredSource: settings.sttSource
+        speachesEndpoint: settings.speachesEnabled ? settings.speachesEndpoint : ""
+        speachesModel: settings.speachesSttModel
+        speachesAutoStart: settings.servicesAutoStart
         onTranscriptReady: function(text) {
             controller._transientStatus = ""
             controller.transcriptReady(text)
@@ -147,6 +150,8 @@ QtObject {
     property Speaker _sp: Speaker {
         id: speaker
         voice: settings.ttsVoice
+        speachesEndpoint: settings.speachesEnabled ? settings.speachesEndpoint : ""
+        speachesAutoStart: settings.servicesAutoStart
         onErrorOccurred: function(message) {
             controller._transientStatus = "Sprachausgabe: " + message
             voiceStatusTimer.restart()
@@ -156,6 +161,8 @@ QtObject {
     property ComfyClient _comfy: ComfyClient {
         id: comfyClient
         endpoint: settings.comfyEnabled ? (settings.comfyEndpoint || "") : ""
+        localEndpoint: settings.comfyEnabled ? settings.comfyEndpointLocal : ""
+        autoStart: settings.comfyEnabled ? settings.servicesAutoStart : false
         // Dieser Handler rendert BEIDE Wege ins Chat-Modell (Tool-Weg wie manueller
         // ImagePanel-Weg — appendGeneratedImage ist die EINZIGE Funktion, die eine
         // bild-tragende Chat-Zeile erzeugt). Task 4, zwei Aspekte:

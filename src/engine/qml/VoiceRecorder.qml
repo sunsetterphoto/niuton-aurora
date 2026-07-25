@@ -29,6 +29,19 @@ Item {
     readonly property string _wav: FileIO.standardPath("cache") + "/aurora-voice.wav"
     readonly property string _transcribe: FileIO.standardPath("home") + "/.local/bin/aurora-transcribe"
 
+    // Speaches-Server (lokaler Quadlet): wenn erreichbar, läuft die
+    // Transkription dort (faster-whisper, Modell bleibt geladen = kein
+    // Kaltstart pro Diktat); sonst der bisherige aurora-transcribe-Pfad.
+    property string speachesEndpoint: ""
+    property string speachesModel: ""
+    property bool speachesAutoStart: false
+
+    property SpeachesClient _speaches: SpeachesClient {
+        endpoint: recorder.speachesEndpoint
+        autoStart: recorder.speachesAutoStart
+        onAvailableChanged: if (available) recorder.available = true
+    }
+
     ProcessRunner {
         id: probeProc
         onFinished: function(code, out, err, trunc, to) {
@@ -37,7 +50,9 @@ Item {
                 recorder.available = true
                 recorder._target = s.length > 3 ? s.substring(3).trim() : ""
             } else {
-                recorder.available = false
+                // Ohne lokalen Whisper-Stack reicht auch Speaches allein
+                // (Aufnahme via pw-record, Transkription auf dem Server).
+                recorder.available = recorder._speaches.available
             }
         }
         onFailed: function(m) { recorder.available = false }
@@ -160,6 +175,17 @@ Item {
     }
 
     function _startTranscription() {
+        if (_speaches.available) {
+            _speaches.transcribe(_wav, speachesModel, language, function(ok, textOrErr) {
+                // wie transcribeProc.onFinished: Abbruch-Guard über recState
+                if (recorder.recState !== "transcribing") return
+                recorder.recState = "idle"
+                if (ok && textOrErr !== "") recorder.transcriptReady(textOrErr)
+                else if (ok) recorder.errorOccurred("Keine Sprache erkannt")
+                else recorder.errorOccurred("Transkription fehlgeschlagen: " + textOrErr)
+            })
+            return
+        }
         transcribeProc.start(_transcribe, [_wav, language])
     }
 }

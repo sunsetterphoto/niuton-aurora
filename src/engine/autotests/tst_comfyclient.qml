@@ -17,6 +17,134 @@ TestCase {
 
     ComfyClient { id: comfy }
 
+    // Zweite Instanz mit Mock-Http für die Kandidaten-Probe (lokal-vor-remote);
+    // die Haupt-Instanz bleibt mit dem echten Singleton im Fire-and-forget-Modus.
+    ComfyClient { id: comfy2 }
+
+    property var httpCalls: []
+    function _mockHttp() {
+        return {
+            getJson: function(url, cb, t) { httpCalls.push({ "url": url, "cb": cb }) },
+            postJson: function(url, body, cb, t) {},
+            downloadToFile: function(url, dest, cb, t) {}
+        }
+    }
+    function _findCall(part) {
+        for (var i = 0; i < httpCalls.length; i++)
+            if (httpCalls[i].url.indexOf(part) !== -1) return i
+        return -1
+    }
+    function _resetComfy2() {
+        comfy2.localEndpoint = ""
+        comfy2.endpoint = ""
+        httpCalls = []
+    }
+
+    function test_lokalerKandidatGewinntVorRemote() {
+        comfy2.http = _mockHttp()
+        comfy2.endpoint = "http://fern:8000"          // zuerst remote (Probe 1, älter)
+        comfy2.localEndpoint = "http://lokal:8188"    // dann lokal (Probe 2, aktuell)
+        var i = _findCall("lokal:8188/queue")
+        verify(i !== -1)
+        httpCalls[i].cb({ "ok": true })
+        compare(comfy2.effectiveEndpoint, "http://lokal:8188")
+        compare(comfy2.available, true)
+        // Die ältere Remote-Probe (Probe 1) darf den Sieg nicht zurückdrehen
+        var j = _findCall("fern:8000/queue")
+        if (j !== -1) httpCalls[j].cb({ "ok": true })
+        compare(comfy2.effectiveEndpoint, "http://lokal:8188")
+        _resetComfy2()
+    }
+
+    function test_lokalerKandidatTotFaelltAufRemote() {
+        comfy2.http = _mockHttp()
+        comfy2.endpoint = "http://fern:8000"
+        comfy2.localEndpoint = "http://lokal:8188"
+        var i = _findCall("lokal:8188/queue")
+        verify(i !== -1)
+        httpCalls[i].cb({ "ok": false })
+        // daraufhin Remote-Probe im selben Lauf (letzter Call)
+        var j = httpCalls.length - 1
+        verify(httpCalls[j].url.indexOf("fern:8000/queue") !== -1)
+        httpCalls[j].cb({ "ok": true })
+        compare(comfy2.effectiveEndpoint, "http://fern:8000")
+        compare(comfy2.available, true)
+        _resetComfy2()
+    }
+
+    function test_beideKandidatenTotNichtVerfuegbarAberRemoteBleibtZiel() {
+        comfy2.http = _mockHttp()
+        comfy2.endpoint = "http://fern:8000"
+        comfy2.localEndpoint = "http://lokal:8188"
+        httpCalls[_findCall("lokal:8188/queue")].cb({ "ok": false })
+        var j = httpCalls.length - 1
+        verify(httpCalls[j].url.indexOf("fern:8000/queue") !== -1)
+        httpCalls[j].cb({ "ok": false })
+        compare(comfy2.available, false)
+        // Remote bleibt Ziel (generate() meldet den Fehler dann dorthin)
+        compare(comfy2.effectiveEndpoint, "http://fern:8000")
+        _resetComfy2()
+    }
+
+    function test_leererLocalEndpointZeigtSynchronAufRemote() {
+        comfy2.http = _mockHttp()
+        comfy2.endpoint = "http://fern:8000"
+        compare(comfy2.effectiveEndpoint, "http://fern:8000")   // ohne Probe synchron
+        _resetComfy2()
+    }
+
+    // Auto-Start: beide Kandidaten krank + autoStart → systemctl-Start der
+    // Unit, Poll auf lokale /queue, bei Gesundheit läuft die normale
+    // Kandidaten-Probe erneut (lokal gewinnt dann).
+    component MockSysctlRunner: QtObject {
+        property int timeoutMs: 0
+        property var started: null
+        signal finished(int exitCode, string stdoutText, string stderrText,
+                        bool truncated, bool timedOut)
+        signal failed(string message)
+        function start(program, args) { started = { "program": program, "args": args } }
+        function destroy() {}
+    }
+
+    property var sysctlRunners: []
+    property Component sysctlFactory: Component {
+        MockSysctlRunner {
+            Component.onCompleted: sysctlRunners.push(this)
+        }
+    }
+
+    function test_autoStartBeiBeidenKandidatenKrank() {
+        sysctlRunners = []
+        comfy2.runnerFactory = sysctlFactory
+        comfy2.autoStart = true
+        comfy2.autoStartPollMs = 1
+        comfy2.autoStartTimeoutS = 1
+        comfy2.http = _mockHttp()
+        comfy2.endpoint = "http://fern:8000"
+        comfy2.localEndpoint = "http://lokal:8188"
+        // aktuelle Kandidaten-Probe: lokal krank → remote krank
+        httpCalls[_findCall("lokal:8188/queue")].cb({ "ok": false })
+        httpCalls[httpCalls.length - 1].cb({ "ok": false })
+        tryVerify(function() { return comfy2._autoStartRunning }, 2000)
+        compare(sysctlRunners.length, 1)
+        compare(sysctlRunners[0].started.args.join(" "), "--user start comfyui")
+        sysctlRunners[0].finished(0, "", "", false, false)
+        // Poll (1 ms) auf lokale /queue; einer davon ok → Auto-Start fertig,
+        // normale Kandidaten-Probe läuft erneut. Achtung: >= 4, denn die drei
+        // Kandidaten-Calls existieren schon vor dem ersten Poll-Tick.
+        tryVerify(function() { return httpCalls.length >= 4 }, 2000)
+        httpCalls[httpCalls.length - 1].cb({ "ok": true })
+        tryVerify(function() { return !comfy2._autoStartRunning }, 2000)
+        tryVerify(function() {
+            return httpCalls[httpCalls.length - 1].url.indexOf("lokal:8188/queue") !== -1
+        }, 2000)
+        httpCalls[httpCalls.length - 1].cb({ "ok": true })
+        compare(comfy2.effectiveEndpoint, "http://lokal:8188")
+        compare(comfy2.available, true)
+        comfy2.autoStart = false
+        _resetComfy2()
+    }
+
     property var failMsgs: []
 
     function _onFailed(msg) { failMsgs.push(msg) }

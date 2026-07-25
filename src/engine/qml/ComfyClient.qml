@@ -5,10 +5,26 @@ import net.niuton.aurora.core
 Item {
     id: comfy
 
+    // endpoint = Remote (Mac), localEndpoint = lokale Quadlet-Instanz.
+    // effectiveEndpoint: wohin generate() tatsächlich geht — lokal, wenn
+    // dessen /queue-Probe gesund ist, sonst remote (LAN-vor-WLAN-Prinzip).
     property string endpoint: ""
+    property string localEndpoint: ""
+    property string effectiveEndpoint: ""
     property bool available: false
     property bool busy: false
     property string statusText: ""
+    // Injizierbar (Tests: Mock-Http); Default bleibt das Singleton.
+    property var http: Http
+    // Auto-Start des lokalen Quadlets, wenn beide Kandidaten krank sind
+    // (servicesAutoStart; dGPU-On-demand-Policy: nur auf Feature-Wunsch).
+    property bool autoStart: false
+    property string unitName: "comfyui"
+    property Component runnerFactory: Component { ProcessRunner {} }
+    property int autoStartTimeoutS: 300   // Erststart baut ggf. ein venv
+    property int autoStartPollMs: 3000
+    property int _autoStartLeft: 0
+    property bool _autoStartRunning: false
     // Vom Aufrufer VOR generate() gesetzt (params.toolInitiated) — unterscheidet
     // tool- von manuell-initiierten Generierungen auf DERSELBEN Instanz. Steuert
     // im AuroraController-Handler, ob das Bild zusätzlich in die API-History
@@ -41,16 +57,86 @@ Item {
     property int _run: 0
     readonly property string _imageDir: FileIO.standardPath("appData") + "/images"
 
+    // Probe-Token: endpoint/localEndpoint-Wechsel stößt je eine Probe an —
+    // verspätete Antworten älterer Läufe dürfen effectiveEndpoint nicht
+    // zurücküberschreiben (z. B. trudelt die Remote-Antwort ein, nachdem
+    // der lokale Kandidat schon gewonnen hat).
+    property int _probeRun: 0
+
     function checkAvailability() {
-        if (!endpoint) { available = false; return }
-        Http.getJson(endpoint + "/queue", function(res) {
-            comfy.available = res.ok
+        var run = ++comfy._probeRun
+        if (localEndpoint) {
+            comfy.http.getJson(localEndpoint + "/queue", function(res) {
+                if (run !== comfy._probeRun) return
+                if (res.ok) _apply(localEndpoint, true)
+                else _probeRemote(run)
+            }, 8000)
+        } else {
+            _probeRemote(run)
+        }
+    }
+
+    function _probeRemote(run) {
+        if (!endpoint) { if (run === comfy._probeRun) { _apply("", false); _maybeAutoStart() } return }
+        comfy.http.getJson(endpoint + "/queue", function(res) {
+            if (run !== comfy._probeRun) return
+            // Remote bleibt auch bei Fehlschlag das Ziel (generate() meldet
+            // den Fehler dann dorthin), available spiegelt die Gesundheit.
+            _apply(endpoint, res.ok)
+            if (!res.ok) comfy._maybeAutoStart()
+        }, 8000)
+    }
+
+    // Beide Kandidaten krank und autoStart an → lokale Unit anstoßen und
+    // pollen, bis sie gesund ist; danach normale Kandidaten-Probe erneut.
+    function _maybeAutoStart() {
+        if (!autoStart || _autoStartRunning || localEndpoint === "") return
+        _autoStartRunning = true
+        _autoStartLeft = Math.max(1, Math.round(autoStartTimeoutS * 1000 / autoStartPollMs))
+        var r = runnerFactory.createObject(comfy, { "timeoutMs": 30000 })
+        r.finished.connect(function(code, out, err, trunc, to) {
+            r.destroy()
+            if (code !== 0) { comfy._autoStartRunning = false; return }
+            startPollTimer.start()
         })
+        r.failed.connect(function(m) { r.destroy(); comfy._autoStartRunning = false })
+        r.start("systemctl", ["--user", "start", unitName])
+    }
+
+    property Timer startPollTimer: Timer {
+        interval: comfy.autoStartPollMs
+        repeat: true
+        onTriggered: {
+            if (comfy._autoStartLeft <= 0) {
+                stop()
+                comfy._autoStartRunning = false
+                return
+            }
+            comfy._autoStartLeft--
+            comfy.http.getJson(comfy.localEndpoint + "/queue", function(res) {
+                if (res.ok) {
+                    stop()
+                    comfy._autoStartRunning = false
+                    comfy.checkAvailability()
+                }
+            }, 8000)
+        }
+    }
+
+    function _apply(url, ok) {
+        effectiveEndpoint = url
+        available = ok
     }
 
     // Endpoint kann sich zur Laufzeit ändern (ComfyUI aus/an, Adresse editiert) —
     // ohne Neubewertung bliebe "available" bis zum nächsten activate() veraltet.
-    onEndpointChanged: checkAvailability()
+    // Bei leerem localEndpoint zeigt effectiveEndpoint synchron auf remote,
+    // damit generate() nie auf einen stale leeren Ziel-String geht.
+    onEndpointChanged: {
+        if (!localEndpoint) effectiveEndpoint = endpoint
+        checkAvailability()
+    }
+    onLocalEndpointChanged: checkAvailability()
 
     // params: { prompt, model, width, height, seed (optional) }
     function generate(params) {
@@ -102,7 +188,7 @@ Item {
     function _submit(wf) {
         statusText = "Sende an ComfyUI..."
         var run = _run
-        Http.postJson(endpoint + "/prompt", { "prompt": wf }, function(res) {
+        comfy.http.postJson(effectiveEndpoint + "/prompt", { "prompt": wf }, function(res) {
             if (run !== comfy._run) return   // Lauf verworfen (cancel/neuer generate)
             if (!res.ok) {
                 comfy._fail("ComfyUI nicht erreichbar" + (res.status ? " (HTTP " + res.status + ")" : ""))
@@ -133,7 +219,7 @@ Item {
             return
         }
         var run = _run
-        Http.getJson(endpoint + "/history/" + _promptId, function(res) {
+        comfy.http.getJson(effectiveEndpoint + "/history/" + _promptId, function(res) {
             if (run !== comfy._run) return   // Lauf verworfen (cancel/neuer generate)
             if (!res.ok) return   // einzelner Poll-Fehler: nächster Tick versucht es erneut
             var entry = res.data[comfy._promptId]
@@ -159,12 +245,12 @@ Item {
 
     function _download(img) {
         statusText = "Lade Bild herunter..."
-        var url = endpoint + "/view?filename=" + encodeURIComponent(img.filename)
+        var url = effectiveEndpoint + "/view?filename=" + encodeURIComponent(img.filename)
                 + "&subfolder=" + encodeURIComponent(img.subfolder || "")
                 + "&type=" + (img.type || "output")
         var dest = _imageDir + "/aurora-" + Date.now() + ".png"
         var run = _run
-        Http.downloadToFile(url, dest, function(res) {
+        comfy.http.downloadToFile(url, dest, function(res) {
             if (run !== comfy._run) return   // Lauf verworfen (cancel/neuer generate)
             comfy.busy = false
             comfy.statusText = ""

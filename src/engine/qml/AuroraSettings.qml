@@ -45,9 +45,14 @@ QtObject {
 
     // Dienste
     property string comfyEndpoint: ConfigStore.value("comfyEndpoint")
+    property string comfyEndpointLocal: ConfigStore.value("comfyEndpointLocal")
     property bool comfyEnabled: ConfigStore.value("comfyEnabled")
     property string comfyDefaultModel: ConfigStore.value("comfyDefaultModel")
     property string searchEndpoint: ConfigStore.value("searchEndpoint")
+    property bool speachesEnabled: ConfigStore.value("speachesEnabled")
+    property string speachesEndpoint: ConfigStore.value("speachesEndpoint")
+    property string speachesSttModel: ConfigStore.value("speachesSttModel")
+    property bool servicesAutoStart: ConfigStore.value("servicesAutoStart")
 
     // Voice
     property string ttsVoice: ConfigStore.value("ttsVoice")
@@ -89,9 +94,14 @@ QtObject {
         toolMaxRounds = ConfigStore.value("toolMaxRounds")
         twoPhaseToolCalls = ConfigStore.value("twoPhaseToolCalls")
         comfyEndpoint = ConfigStore.value("comfyEndpoint")
+        comfyEndpointLocal = ConfigStore.value("comfyEndpointLocal")
         comfyEnabled = ConfigStore.value("comfyEnabled")
         comfyDefaultModel = ConfigStore.value("comfyDefaultModel")
         searchEndpoint = ConfigStore.value("searchEndpoint")
+        speachesEnabled = ConfigStore.value("speachesEnabled")
+        speachesEndpoint = ConfigStore.value("speachesEndpoint")
+        speachesSttModel = ConfigStore.value("speachesSttModel")
+        servicesAutoStart = ConfigStore.value("servicesAutoStart")
         ttsVoice = ConfigStore.value("ttsVoice")
         ttsAutoSpeak = ConfigStore.value("ttsAutoSpeak")
         sttLanguage = ConfigStore.value("sttLanguage")

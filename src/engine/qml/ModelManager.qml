@@ -54,6 +54,28 @@ QtObject {
         onTriggered: mgr.checkPowerProfile()
     }
 
+    // Live-Sync mit dem Modell-Store (KCM): nach Pull/Remove bumped der Store
+    // den internen Key "modelsRevision" → hier neu proben, sonst bliebe der
+    // Header-Picker im Panel-Widget (aktiviert nie neu) bis zum
+    // plasmashell-Restart stale. Wert-Vergleich: revisionChanged feuert bei
+    // JEDER Config-Änderung — nur bei echtem modelsRevision-Wechsel proben.
+    // active-Guard: inaktive Manager proben nicht (refresh() holt die Probe
+    // beim nächsten activate() nach) — verhindert auch, dass ein sterbender
+    // Manager (destroy() ist deferred) auf Config-Reset/Writes noch Requests
+    // absetzt.
+    property string _modelsRev: String(Core.ConfigStore.value("modelsRevision") || "")
+    property Connections _cfgWatch: Connections {
+        target: Core.ConfigStore
+        function onRevisionChanged() {
+            if (!mgr.active) return
+            var v = String(Core.ConfigStore.value("modelsRevision") || "")
+            if (v !== mgr._modelsRev) {
+                mgr._modelsRev = v
+                mgr.probeBackends()
+            }
+        }
+    }
+
     // Gruppierte Einträge für den Model-Picker (Struktur wie bisher,
     // plus enabled-Feld: Auto ohne Energieprofil ist deaktiviert)
     readonly property var pickerEntries: {
@@ -94,7 +116,19 @@ QtObject {
     }
     function apiBase() { return activeClient().baseUrl }
     function chat(request) { return activeClient().chat(request) }
-    function embed(model, input, callback) { activeClient().embed(model, input, callback) }
+    // Embedding mit Backend-Fallback: aktives Backend zuerst; liefert es null
+    // (Embedding-Modell fehlt dort oder Backend down), der zweite Client —
+    // RAG soll funktionieren, solange IRGENDEIN Backend das Modell hat
+    // (Stand 25.07.: nomic-embed-text fehlte auf einem der beiden Backends).
+    function embed(model, input, callback) {
+        var first = activeClient()
+        var second = (first === localClient) ? remoteClient : localClient
+        first.embed(model, input, function(vec) {
+            if (vec) { callback(vec); return }
+            if (second.baseUrl === "") { callback(null); return }
+            second.embed(model, input, callback)
+        })
+    }
 
     // ---------- Power-Profil / Auto-Modus ----------
 

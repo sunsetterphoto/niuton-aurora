@@ -16,7 +16,8 @@ Item {
 
         function test_alleKcmSeitenLadenOhneFehler() {
             var pages = [ "ConfigGeneral.qml", "ConfigTools.qml", "ConfigModels.qml",
-                          "ConfigModelStore.qml", "ConfigVoice.qml", "ConfigAdvanced.qml" ]
+                          "ConfigModelStore.qml", "ConfigServices.qml",
+                          "ConfigVoice.qml", "ConfigAdvanced.qml" ]
             for (var i = 0; i < pages.length; i++) {
                 pageLoader.source = Qt.resolvedUrl("../../../package/contents/ui/config/" + pages[i])
                 compare(pageLoader.status, Loader.Ready, pages[i] + " lädt nicht")

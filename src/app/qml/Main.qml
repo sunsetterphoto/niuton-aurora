@@ -32,6 +32,7 @@ Kirigami.AbstractApplicationWindow {
         controller: auroraController
         showPin: false
         showConfigure: false
+        showAppLauncher: false
         onCloseRequested: appWindow.close()
     }
 }

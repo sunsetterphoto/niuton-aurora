@@ -26,6 +26,7 @@ RowLayout {
     property bool comfyOk: false
     property bool showPin: true
     property bool showConfigure: true
+    property bool showAppLauncher: true   // App selbst blendet den Absprung aus
     property bool showTune: true
 
     // Aktionen
@@ -38,6 +39,7 @@ RowLayout {
     signal memoryRequested()
     signal knowledgeRequested()
     signal configureRequested()
+    signal appLaunchRequested()
     signal tuneModelRequested()
     signal closeRequested()
 
@@ -255,6 +257,12 @@ RowLayout {
                 text: "Wissensbasis"
                 icon.name: "bookmarks"
                 onTriggered: header.knowledgeRequested()
+            }
+            QQC2.MenuItem {
+                text: "App öffnen"
+                icon.name: "window-new"
+                visible: header.showAppLauncher
+                onTriggered: header.appLaunchRequested()
             }
             QQC2.MenuItem {
                 text: "Einstellungen"

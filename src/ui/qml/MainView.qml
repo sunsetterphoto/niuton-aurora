@@ -17,8 +17,10 @@ ColumnLayout {
     property bool isPinned: false          // Pin-Knopf-Zustand (Host bindet)
     property bool showPin: true            // App blendet Pin aus
     property bool showConfigure: true      // App blendet Konfigurieren aus
+    property bool showAppLauncher: true    // App blendet den Absprung in die App aus
     signal pinToggled(bool on)
     signal configureRequested()
+    signal appLaunchRequested()
     signal closeRequested()
 
     property bool _sidebarOpen: false      // interner View-Zustand (beide Hosts)
@@ -46,6 +48,7 @@ ColumnLayout {
         comfyOk: root.controller.comfyAvailable
         showPin: root.showPin
         showConfigure: root.showConfigure
+        showAppLauncher: root.showAppLauncher
 
         onToggleSidebar: root._sidebarOpen = !root._sidebarOpen
         onNewChatRequested: root.controller.newConversation()
@@ -56,6 +59,7 @@ ColumnLayout {
         onMemoryRequested: root.controller.openMemory()
         onKnowledgeRequested: root.controller.openKnowledge()
         onConfigureRequested: root.configureRequested()
+        onAppLaunchRequested: root.appLaunchRequested()
         onTuneModelRequested: root._tuneOpen = !root._tuneOpen
         onCloseRequested: root.closeRequested()
     }

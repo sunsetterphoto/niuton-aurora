@@ -175,6 +175,19 @@ PlasmoidItem {
         }
     }
 
+    // Absprung in die Standalone-App: detached via setsid --fork — der direkte
+    // Kindprozess endet sofort (Runner sauber), die App läuft in eigener
+    // Session und überlebt damit einen plasmashell-Neustart (ProcessRunner
+    // killt beim Teardown sonst seine Prozessgruppe). KDBusService::Unique
+    // in der App hebt einfach das bestehende Fenster, falls sie schon läuft.
+    ProcessRunner { id: appLauncher }
+
+    function _launchApp() {
+        if (appLauncher.running) return
+        appLauncher.start("setsid", ["--fork",
+                                     FileIO.standardPath("home") + "/.local/bin/aurora"])
+    }
+
     // ==================== Full Representation ====================
     // Die View-Montage lebt in der geteilten MainView (net.niuton.aurora.ui);
     // der Host bindet nur den Controller und reicht host-spezifische Aktionen
@@ -189,6 +202,7 @@ PlasmoidItem {
         isPinned: root.isPinned
         onPinToggled: function(on) { root.isPinned = on }
         onConfigureRequested: Plasmoid.internalAction("configure").trigger()
+        onAppLaunchRequested: root._launchApp()
         onCloseRequested: root.expanded = false
     }
 }

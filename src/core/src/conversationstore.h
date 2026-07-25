@@ -35,6 +35,11 @@ public:
     Q_INVOKABLE QVariantList messages(const QString &conversationId) const;
     Q_INVOKABLE QString latestConversationId() const;
     Q_INVOKABLE QVariantMap conversation(const QString &id) const;
+    // Tool-Aufrufe aller Nachrichten einer Konversation (Join über messages),
+    // geordnet nach message_id, call_index. Einträge: {messageId, callIndex,
+    // toolName, arguments (Map), status, startedAt, finishedAt, resultMessageId}.
+    // Dient der Wiederherstellung der toolActivity-Chips beim Konversations-Reload.
+    Q_INVOKABLE QVariantList toolCallsForConversation(const QString &conversationId) const;
     Q_INVOKABLE QVariantList goodExamples() const;
     Q_INVOKABLE QString questionForAnswer(const QString &assistantId) const;
     Q_INVOKABLE QVariantList knowledgeEntries() const;

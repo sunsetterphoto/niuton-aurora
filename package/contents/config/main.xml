@@ -5,134 +5,20 @@
       http://www.kde.org/standards/kcfg/1.0/kcfg.xsd">
   <kcfgfile name=""/>
 
-  <!-- Nur noch Migrations-/Legacy-Quelle (Spec 2c, Stufe 2c): die KCM-Seiten
-       lesen/schreiben seit Task 4 direkt gegen den geteilten ConfigStore
-       (net.niuton.aurora.core, ~/.config/net.niuton.aurora.rc). Dieses Schema
-       liefert main.qml._migrateConfigOnce() nur noch die appletsrc-Altwerte
-       fuer die einmalige Uebernahme beim ersten Start nach dem Umstieg; es
-       gibt keine cfg_-Konsumenten in package/contents/ui/config/ mehr.
-       maxContext ist ein toter Key (ConfigStore kennt ihn nicht mehr) und
-       bleibt hier nur inert stehen, um Alt-appletsrc nicht zu brechen. -->
+  <!-- Bewusst LEER: Aurora nutzt nicht plasmoid.configuration, sondern den
+       geteilten ConfigStore (~/.config/net.niuton.aurora.rc; Schema-Defaults in
+       src/core/src/configstore.cpp) — damit Widget, App und KCM-Seiten live
+       synchron sind. Jeder entry hier würde das Plasma-Config-Framework
+       veranlassen, beim Öffnen des Konfigdialogs cfg_<key>-Properties in die
+       Seiten-Roots zu injizieren, die es bewusst nicht gibt (Log-Rauschen
+       "Setting initial properties failed: ... does not have a property called
+       cfg_..." bei JEDEM Öffnen).
+
+       Historisch standen hier die Migrationsschlüssel für
+       main.qml._migrateConfigOnce() (appletsrc-Altwerte → ConfigStore beim
+       ersten Start nach der Umstellung 2026-07-18). Die Migration bleibt im
+       Code und läuft ohne Schema tolerant ins Leere (undefined → übersprungen);
+       migrierte Bestände tragen _migratedFromAppletsrc in der INI. -->
   <group name="General">
-    <entry name="maxContext" type="Int">
-      <default>8192</default>
-    </entry>
-    <entry name="unloadSeconds" type="Int">
-      <default>300</default>
-    </entry>
-    <entry name="panelIconAnimation" type="String">
-      <default>calm</default>
-    </entry>
-    <entry name="twoPhaseToolCalls" type="Bool">
-      <default>false</default>
-    </entry>
-  </group>
-
-  <group name="Tools">
-    <entry name="toolWebSearch" type="String">
-      <default>auto</default>
-    </entry>
-    <entry name="toolReadFile" type="String">
-      <default>auto</default>
-    </entry>
-    <entry name="toolListDir" type="String">
-      <default>auto</default>
-    </entry>
-    <entry name="toolWebFetch" type="String">
-      <default>auto</default>
-    </entry>
-    <entry name="toolWriteFile" type="String">
-      <default>confirm</default>
-    </entry>
-    <entry name="toolRunCommand" type="String">
-      <default>confirm</default>
-    </entry>
-    <entry name="toolMaxRounds" type="Int">
-      <default>5</default>
-    </entry>
-  </group>
-
-  <group name="Models">
-    <entry name="modelLowPower" type="String">
-      <default>gemma4:e2b</default>
-    </entry>
-    <entry name="modelBalanced" type="String">
-      <default>gemma4:e4b</default>
-    </entry>
-    <entry name="modelPerformance" type="String">
-      <default>qwen3.5:9b</default>
-    </entry>
-    <entry name="remoteEnabled" type="Bool">
-      <default>true</default>
-    </entry>
-    <entry name="remoteEndpoint" type="String">
-      <default></default>
-    </entry>
-    <entry name="remoteEndpointFallback" type="String">
-      <default></default>
-    </entry>
-    <entry name="lastSelectedModel" type="String">
-      <default>auto</default>
-    </entry>
-    <entry name="embedModel" type="String">
-      <default>nomic-embed-text</default>
-    </entry>
-    <entry name="ragEnabled" type="Bool">
-      <default>true</default>
-    </entry>
-    <entry name="ragTopK" type="Int">
-      <default>3</default>
-    </entry>
-    <entry name="ragThreshold" type="Double">
-      <default>0.75</default>
-    </entry>
-  </group>
-
-  <group name="Comfy">
-    <entry name="comfyEnabled" type="Bool">
-      <default>true</default>
-    </entry>
-    <entry name="comfyEndpoint" type="String">
-      <default></default>
-    </entry>
-    <entry name="comfyEndpointLocal" type="String">
-      <default>http://127.0.0.1:8188</default>
-    </entry>
-    <entry name="comfyDefaultModel" type="String">
-      <default>z_image_turbo</default>
-    </entry>
-    <entry name="comfyFreeVram" type="Bool">
-      <default>true</default>
-    </entry>
-  </group>
-
-  <group name="Services">
-    <entry name="speachesEnabled" type="Bool">
-      <default>true</default>
-    </entry>
-    <entry name="speachesEndpoint" type="String">
-      <default>http://127.0.0.1:8000</default>
-    </entry>
-    <entry name="speachesSttModel" type="String">
-      <default>Systran/faster-whisper-large-v3</default>
-    </entry>
-    <entry name="servicesAutoStart" type="Bool">
-      <default>false</default>
-    </entry>
-  </group>
-
-  <group name="Voice">
-    <entry name="ttsVoice" type="String">
-      <default>de_DE-thorsten-high</default>
-    </entry>
-    <entry name="ttsAutoSpeak" type="Bool">
-      <default>false</default>
-    </entry>
-    <entry name="sttLanguage" type="String">
-      <default>auto</default>
-    </entry>
-    <entry name="sttSource" type="String">
-      <default></default>
-    </entry>
   </group>
 </kcfg>

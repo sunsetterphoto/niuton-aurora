@@ -308,7 +308,7 @@ private Q_SLOTS:
         f.store->sweepNonFinal();
         QTRY_COMPARE(done.count(), 4);
 
-        // Verifikation über eine Testverbindung (tool_calls hat keine Lese-API — Phase 5)
+        // Verifikation zusätzlich direkt am SQL (unabhängig von der Lese-API)
         {
             QSqlDatabase db = QSqlDatabase::addDatabase("QSQLITE", "tccheck");
             db.setDatabaseName(f.store->dbPath());
@@ -322,6 +322,46 @@ private Q_SLOTS:
             db.close();
         }
         QSqlDatabase::removeDatabase("tccheck");
+    }
+
+    void toolCallsForConversation_joinedUeberMessagesUndSortiert()
+    {
+        StoreFixture f;
+        QVERIFY(f.store->open().value("ok").toBool());
+        QSignalSpy done(f.store, &ConversationStore::writeCompleted);
+        const QString cid = f.store->newUuid();
+        const QString mid = f.store->newUuid();
+        f.store->appendMessage({{"conversationId", cid}, {"id", mid},
+                                {"role", "assistant"}, {"content", ""}});
+        QTRY_COMPARE(done.count(), 1);
+
+        // Reihenfolge der Inserts absichtlich umgekehrt zum call_index
+        f.store->appendToolCall({{"id", "tc-2"}, {"messageId", mid}, {"callIndex", 1},
+                                 {"toolName", "web_fetch"}});
+        f.store->appendToolCall({{"id", "tc-1"}, {"messageId", mid}, {"callIndex", 0},
+                                 {"toolName", "web_search"},
+                                 {"arguments", QVariantMap{{"query", "wetter"}}}});
+        QTRY_COMPARE(done.count(), 3);
+        f.store->updateToolCall("tc-1", {{"status", "ok"},
+                                         {"startedAt", "2026-07-25T10:00:01.100"},
+                                         {"finishedAt", "2026-07-25T10:00:02.600"},
+                                         {"resultMessageId", "res-1"}});
+        QTRY_COMPARE(done.count(), 4);
+
+        const QVariantList tcs = f.store->toolCallsForConversation(cid);
+        QCOMPARE(tcs.size(), 2);
+        const QVariantMap first = tcs.at(0).toMap();
+        QCOMPARE(first.value("toolName").toString(), QString("web_search"));
+        QCOMPARE(first.value("callIndex").toInt(), 0);
+        QCOMPARE(first.value("messageId").toString(), mid);
+        QCOMPARE(first.value("status").toString(), QString("ok"));
+        QCOMPARE(first.value("arguments").toMap().value("query").toString(), QString("wetter"));
+        QCOMPARE(first.value("startedAt").toString(), QString("2026-07-25T10:00:01.100"));
+        QCOMPARE(first.value("finishedAt").toString(), QString("2026-07-25T10:00:02.600"));
+        QCOMPARE(first.value("resultMessageId").toString(), QString("res-1"));
+        QCOMPARE(tcs.at(1).toMap().value("toolName").toString(), QString("web_fetch"));
+
+        QCOMPARE(f.store->toolCallsForConversation(QStringLiteral("gibt-es-nicht")).size(), 0);
     }
 
     void deleteMessage_entferntEinzelneZeile_seqVergabeBleibtMonoton()

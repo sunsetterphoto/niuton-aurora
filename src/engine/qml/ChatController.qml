@@ -584,6 +584,19 @@ QtObject {
                                  "status": "pending", "durationMs": 0 })
             }
             _writeActivity()
+            // DB-Spur für die Reload-Wiederherstellung der toolActivity-Chips:
+            // pro Call eine tool_calls-Zeile; die dbId bleibt in _activity für
+            // die Status-Updates des Laufs (best-effort, Alt-/Mock-Stores ohne
+            // appendToolCall werden übersprungen).
+            if (typeof ctl.store.appendToolCall === "function") {
+                for (var t = 0; t < _activity.length; t++) {
+                    var dbId = "tc-" + aid + "-" + t
+                    _activity[t].dbId = dbId
+                    ctl.store.appendToolCall({ "id": dbId, "messageId": aid, "callIndex": t,
+                        "toolName": _activity[t].name,
+                        "arguments": _queue[t]["function"].arguments || {}, "status": "pending" })
+                }
+            }
             state = "toolRunning"
             _runNextCall()
             return
@@ -601,8 +614,24 @@ QtObject {
         if (_queuePos < _activity.length) {
             _activity[_queuePos].status = status
             _writeActivity()
+            if (status === "running")
+                _persistCallStatus(_queuePos, { "status": "running", "startedAt": _isoNow() })
+            else if (status === "denied")
+                _persistCallStatus(_queuePos, { "status": "denied", "finishedAt": _isoNow() })
+            // "pending" ist in der DB bereits der appendToolCall-Initialzustand
         }
     }
+
+    // Best-effort-Update der tool_calls-Zeile eines Calls (Alt-/Mock-Stores
+    // ohne updateToolCall werden übersprungen). DB-Status-Konvention: "ok"
+    // (nicht "done"), CHECK-Constraint der Tabelle.
+    function _persistCallStatus(idx, fields) {
+        if (idx < 0 || idx >= _activity.length) return
+        var dbId = _activity[idx].dbId
+        if (!dbId || typeof ctl.store.updateToolCall !== "function") return
+        ctl.store.updateToolCall(dbId, fields)
+    }
+    function _isoNow() { return Qt.formatDateTime(new Date(), Qt.ISODateWithMs) }
 
     property var _pending: null       // { name, args, key, description }
 
@@ -686,7 +715,9 @@ QtObject {
             // eskaliert das naechste Tool der anderen Kategorie grundlos.
             var cat = ctl.registry.categoryOf ? ctl.registry.categoryOf(name) : "local"
             ctl._catPolicy.noteResult(cat)
-            ctl._pushToolMessage(name, text)
+            var tid = ctl._pushToolMessage(name, text)
+            _persistCallStatus(_queuePos, { "status": (st === "ok") ? "ok" : "error",
+                                            "finishedAt": _isoNow(), "resultMessageId": tid })
             ctl._queuePos++
             ctl._runNextCall()
         })
@@ -701,7 +732,10 @@ QtObject {
         // Audit-Fix (Klein/ux): hier KEIN _catPolicy.noteResult — _feedResult
         // laeuft nur fuer NICHT ausgefuehrte Tools (off/disabled/denied) und
         // Loop-Cache-Treffer (deren erster Lauf bereits in _execute notiert hat).
-        _pushToolMessage(name, text)
+        var tid = _pushToolMessage(name, text)
+        // Cache-Treffer (status "ok") -> DB "ok"; off/disabled/denied -> "denied"
+        _persistCallStatus(_queuePos, { "status": (status === "ok") ? "ok" : "denied",
+                                        "finishedAt": _isoNow(), "resultMessageId": tid })
         _queuePos++
         _runNextCall()
     }
@@ -714,6 +748,7 @@ QtObject {
                              "status": "final", "model": ctl.activeModel,
                              "backend": ctl.isRemote ? "remote" : "local" })
         _messages.push({ "role": "tool", "tool_name": name, "content": text, "_msgId": tid })
+        return tid   // tool_calls.result_message_id der Persistenz-Spur
     }
 
     function _afterRound() {
@@ -765,6 +800,12 @@ QtObject {
         if (ctl.registry) ctl.registry.abortRunning()
         _queue = []; _queuePos = 0; _pending = null
         statusText = ""
+        // Offene Calls des abgebrochenen Zuges in der DB-Spur abschließen,
+        // sonst zeigen die Chips nach einem Reload ewig pending/running.
+        for (var s = 0; s < _activity.length; s++) {
+            if (_activity[s].status === "pending" || _activity[s].status === "running")
+                _persistCallStatus(s, { "status": "aborted", "finishedAt": _isoNow() })
+        }
         _activity = []
         if (_streamIndex >= 0 && _streamIndex < chatModel.count) {
             var partial = _content !== "" ? _cleanResponse(_content) : "(Abgebrochen)"
@@ -852,6 +893,29 @@ QtObject {
         _ragSources = []; _ragByMsgId = ({})
         var rows = store.messages(convId)
         conversationId = convId
+        // Tool-Aufrufe der Konversation nach messageId gruppieren — daraus werden
+        // die toolActivity-Chips der Zwischenzeilen restauriert (Persistenz-Spur,
+        // die der laufende Zug via appendToolCall/updateToolCall schreibt).
+        // DB-Status "ok" wird auf die UI-Konvention "done" gemappt.
+        var tcByMsg = ({})
+        if (typeof store.toolCallsForConversation === "function") {
+            var tcs = store.toolCallsForConversation(convId) || []
+            for (var t = 0; t < tcs.length; t++) {
+                var tc = tcs[t]
+                if (!tcByMsg[tc.messageId]) tcByMsg[tc.messageId] = []
+                var dur = 0
+                if (tc.startedAt && tc.finishedAt) {
+                    var dd = Date.parse(tc.finishedAt) - Date.parse(tc.startedAt)
+                    if (dd > 0) dur = dd
+                }
+                tcByMsg[tc.messageId].push({
+                    "name": tc.toolName,
+                    "describe": (ctl.registry && typeof ctl.registry.describe === "function")
+                                ? ctl.registry.describe(tc.toolName, tc.arguments || {}) : tc.toolName,
+                    "status": tc.status === "ok" ? "done" : tc.status,
+                    "durationMs": dur })
+            }
+        }
         var hist = []
         for (var i = 0; i < rows.length; i++) {
             var m = rows[i]
@@ -859,25 +923,34 @@ QtObject {
             var imgPath = m.mediaPath || ""
             if (!imgPath && m.extra && m.extra.attachments && m.extra.attachments.length > 0)
                 imgPath = m.extra.attachments[0].path
-            // Audit-Fix (Klein/ux, bewusste Ausblend-Variante aus dem Audit —
-            // toolActivity-Persistenz bleibt Backlog): persistierte assistant-
-            // Zwischenzeilen eines Tool-Zuges (tool_calls, leerer content) nach
-            // dem Reload NICHT als leere Ghost-Bubbles zeigen — weder Bubble noch
-            // _messages-Eintrag. Der Tool-Zug-Kontext entsteht beim Reload
-            // ohnehin nicht (tool-Zeilen werden oben bereits gefiltert).
-            // assistant-Zeilen MIT mediaPath (generierte Bilder) bleiben.
-            if (m.role === "assistant" && !m.content && imgPath === "") continue
+            // Assistant-Zwischenzeilen eines Tool-Zuges: mit Persistenz-Spur
+            // (tcAct) bekommen sie ihre toolActivity-Chips zurück und bleiben
+            // sichtbar — ganz ohne Spur UND ohne content/mediaPath sind es
+            // Ghost-Bubbles (z. B. Alt-Zeilen), die ausgeblendet bleiben.
+            // Der Tool-Zug-Kontext entsteht beim Reload ohnehin nicht
+            // (tool-Zeilen werden oben bereits gefiltert) — Zwischenzeilen mit
+            // leerem content gehen daher auch nicht in _messages (hist), nur
+            // in die sichtbare Bubble. assistant-Zeilen MIT mediaPath
+            // (generierte Bilder) bleiben.
+            var tcAct = tcByMsg[m.id] || null
+            if (m.role === "assistant" && !m.content && imgPath === "" && !tcAct) continue
             // Attribution (Scheibe C) aus extra.ragSources restaurieren — mit
             // Shape-Guard (handeditierte/ältere DBs: String/Map statt Liste).
             var _ragRaw = (m.extra && m.extra.ragSources) ? m.extra.ragSources : []
             var rag = (_ragRaw.length > 0 && typeof _ragRaw[0] === "object") ? _ragRaw : []
             if (rag.length > 0) _ragByMsgId[m.id] = rag
-            hist.push({ "role": m.role, "content": m.content, "_msgId": m.id })
+            // Reine Activity-Zwischenzeilen (leerer content, kein Bild) nicht in
+            // die API-History — assistant(tool_calls) ohne die gefilterten
+            // tool-Ergebnisse wäre eine kaputte Sequenz fürs Backend.
+            // Bild-Zeilen (mediaPath) bleiben wie bisher im Kontext.
+            if (!(m.role === "assistant" && !m.content && imgPath === ""))
+                hist.push({ "role": m.role, "content": m.content, "_msgId": m.id })
             _appendRow({ msgId: m.id, text: m.content, isUser: m.role === "user",
                          thinking: m.thinking || "", status: m.status || "",
                          ts: Qt.formatTime(new Date(m.createdAt), "hh:mm"),
                          mediaPath: imgPath, mediaType: imgPath ? "image" : "",
                          rating: m.rating || 0,
+                         toolActivity: tcAct ? JSON.stringify(tcAct) : "[]",
                          ragSources: rag.length > 0 ? JSON.stringify(rag) : "[]" })
         }
         _messages = hist

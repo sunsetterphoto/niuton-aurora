@@ -30,7 +30,8 @@ TestCase {
         return {
             getJson: function(url, cb, t) { laufCalls.push({ "url": url, "cb": cb }) },
             postJson: function(url, body, cb, t) { laufCalls.push({ "url": url, "body": body, "cb": cb }) },
-            downloadToFile: function(url, dest, cb, t) { laufCalls.push({ "url": url, "dest": dest, "cb": cb }) }
+            downloadToFile: function(url, dest, cb, t) { laufCalls.push({ "url": url, "dest": dest, "cb": cb }) },
+            cancelDownload: function(url) { laufCalls.push({ "url": "CANCEL:" + url }) }
         }
     }
     function _lastCall(part) {
@@ -81,6 +82,39 @@ TestCase {
         _driveLauf(false)
         compare(_lastCall("/free"), null)
         compare(comfy3.busy, false)
+        _resetComfy3()
+    }
+
+    // cancel() während des Bild-Downloads: Http.cancelDownload wird mit der
+    // laufenden URL gerufen, der verspätete Download-Callback wird verworfen
+    // (kein finished, busy bleibt false).
+    function test_cancelBrichtLaufendenDownloadAb() {
+        verify(_writeOkTemplate().ok)
+        laufCalls = []
+        comfy3.http = _laufMock()
+        comfy3.localEndpoint = ""
+        comfy3.endpoint = "http://fern:8000"
+        comfy3.generate({ prompt: "Baum", model: "tst_comfy_ok" })
+        _lastCall("/prompt").cb({ "ok": true, "data": { "prompt_id": "p1" } })
+        tryVerify(function() { return _lastCall("/history/") !== null }, 4000)
+        _lastCall("/history/").cb({ "ok": true, "data": { "p1": {
+            "status": { "completed": true },
+            "outputs": { "9": { "images": [ { "filename": "x.png", "subfolder": "", "type": "output" } ] } }
+        } } })
+        tryVerify(function() { return _lastCall("/view?") !== null }, 2000)
+        var dlCall = _lastCall("/view?")                   // VOR cancel merken
+        compare(comfy3.busy, true)                       // Download läuft noch
+        comfy3.cancel()
+        var c = _lastCall("CANCEL:")
+        verify(c !== null)
+        verify(c.url.indexOf("CANCEL:http://fern:8000/view?") === 0)
+        var finCount = 0
+        var onFin = function() { finCount++ }
+        comfy3.finished.connect(onFin)
+        dlCall.cb({ "ok": true, "path": "/tmp/x.png" })   // verspätet
+        compare(finCount, 0)
+        compare(comfy3.busy, false)
+        comfy3.finished.disconnect(onFin)
         _resetComfy3()
     }
 

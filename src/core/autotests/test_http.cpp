@@ -258,6 +258,26 @@ private Q_SLOTS:
         QVERIFY(!QFile::exists(dest));
     }
 
+    void cancelDownload_brichtLaufendenDownloadAb()
+    {
+        // Verzögerte Chunk-Antwort: der Download läuft noch, wenn cancelDownload
+        // greift -> Callback mit ok:false, keine Datei (QSaveFile wird nie
+        // erreicht), zweiter cancelDownload-Aufruf ist no-op.
+        TestHttpServer server;
+        server.setChunkedResponse(200, {"eins", "zwei", "drei"}, 300);
+        QTemporaryDir dir;
+        const QString dest = dir.path() + "/x.bin";
+        HttpFixture f;
+        const QString url = server.baseUrl() + "/view";
+        f.http->downloadToFile(url, dest, f.callback());
+        f.http->cancelDownload(url);
+        const QVariantMap r = f.wait();
+        QCOMPARE(r.value("ok").toBool(), false);
+        QVERIFY(!QFile::exists(dest));
+        f.http->cancelDownload(url);   // no-op ohne laufenden Download
+        f.http->cancelDownload(QStringLiteral("http://ander.invalid/x"));   // fremde URL: no-op
+    }
+
     // Ollama /api/delete: DELETE mit JSON-Body {"name": "..."}.
     void deleteJson_sendetMethodeBodyUndContentType()
     {

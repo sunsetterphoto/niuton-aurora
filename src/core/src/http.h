@@ -32,6 +32,11 @@ public:
     Q_INVOKABLE void deleteJson(const QString &url, const QVariant &body, const QJSValue &callback, int timeoutMs = 0);
     // callback(result): { ok, status, path, error } — legt Zielordner an, schreibt atomar (QSaveFile)
     Q_INVOKABLE void downloadToFile(const QString &url, const QString &destPath, const QJSValue &callback, int timeoutMs = 0);
+    // Bricht einen laufenden downloadToFile-Download derselben URL ab (no-op,
+    // wenn keiner läuft). Der Callback feuert danach noch mit ok:false
+    // (OperationCanceledError) — Aufrufer mit eigenem Lauf-Token (z. B.
+    // ComfyClient._run) verwerfen ihn; geschrieben wird dank QSaveFile nie.
+    Q_INVOKABLE void cancelDownload(const QString &url);
 
 Q_SIGNALS:
     void defaultTimeoutMsChanged();
@@ -49,4 +54,6 @@ private:
 
     QNetworkAccessManager m_nam;
     int m_defaultTimeoutMs = 15000;
+    // Laufende downloadToFile-Downloads (URL -> reply) für cancelDownload().
+    QHash<QString, QNetworkReply *> m_downloads;
 };

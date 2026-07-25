@@ -77,6 +77,9 @@ Item {
     // synchroner Sofort-Neustart (alter Callback trifft erst nach dem neuen
     // generate() ein) kann den neuen Lauf nicht kapern.
     property int _run: 0
+    // URL des laufenden Bild-Downloads ("" = keiner) — cancel() bricht ihn
+    // über Http.cancelDownload ab.
+    property string _downloadUrl: ""
     readonly property string _imageDir: FileIO.standardPath("appData") + "/images"
 
     // Probe-Token: endpoint/localEndpoint-Wechsel stößt je eine Probe an —
@@ -196,13 +199,18 @@ Item {
     // Lokalen Abbruch (z. B. Chat-Stop bei tool-initiierter Generierung): die
     // Generierung auf dem Server läuft zu Ende (ComfyUI kann von hier nicht
     // abgebrochen werden), aber lokal wird NICHTS mehr heruntergeladen oder
-    // gespeichert und kein Signal gefeuert. Ein evtl. schon angestoßener
-    // Download schreibt seine Datei noch zu Ende (kein Http-Abort) — sein
-    // Callback wird verworfen, das fertige Bild landet nicht im Chat.
+    // gespeichert und kein Signal gefeuert. Ein laufender Download wird über
+    // Http.cancelDownload abgebrochen (kein RAM-Puffer/Netzwerk bis zum Ende);
+    // sein verworfener Callback schreibt dank QSaveFile niemals eine Datei.
     function cancel() {
         if (!busy) return
         _run += 1    // in-flight Callbacks dieses Laufs verwerfen (Token-Mismatch)
         pollTimer.stop()
+        if (_downloadUrl !== "") {
+            if (typeof comfy.http.cancelDownload === "function")
+                comfy.http.cancelDownload(_downloadUrl)
+            _downloadUrl = ""
+        }
         busy = false
         statusText = ""
         toolInitiated = false
@@ -277,7 +285,9 @@ Item {
                 + "&type=" + (img.type || "output")
         var dest = _imageDir + "/aurora-" + Date.now() + ".png"
         var run = _run
+        comfy._downloadUrl = url
         comfy.http.downloadToFile(url, dest, function(res) {
+            comfy._downloadUrl = ""
             if (run !== comfy._run) return   // Lauf verworfen (cancel/neuer generate)
             comfy.busy = false
             comfy.statusText = ""

@@ -924,6 +924,37 @@ QVariantList ConversationStore::messages(const QString &conversationId) const
     return out;
 }
 
+QVariantList ConversationStore::toolCallsForConversation(const QString &conversationId) const
+{
+    QVariantList out;
+    if (!m_ready) return out;
+    QSqlQuery q(QSqlDatabase::database(m_readConn));
+    q.prepare(QStringLiteral(
+        "SELECT t.message_id, t.call_index, t.tool_name, t.arguments, t.status,"
+        " t.started_at, t.finished_at, t.result_message_id "
+        "FROM tool_calls t JOIN messages m ON m.id = t.message_id "
+        "WHERE m.conversation_id = :cid ORDER BY t.message_id, t.call_index"));
+    q.bindValue(QStringLiteral(":cid"), conversationId);
+    if (!q.exec()) {
+        Q_EMIT const_cast<ConversationStore *>(this)->readFailed(
+            QStringLiteral("toolCallsForConversation"), q.lastError().text());
+        return out;
+    }
+    while (q.next()) {
+        out.append(QVariantMap{
+            {QStringLiteral("messageId"), q.value(0).toString()},
+            {QStringLiteral("callIndex"), q.value(1).toInt()},
+            {QStringLiteral("toolName"), q.value(2).toString()},
+            {QStringLiteral("arguments"), jsonToMap(q.value(3).toString())},
+            {QStringLiteral("status"), q.value(4).toString()},
+            {QStringLiteral("startedAt"), q.value(5).toString()},
+            {QStringLiteral("finishedAt"), q.value(6).toString()},
+            {QStringLiteral("resultMessageId"), q.value(7).toString()},
+        });
+    }
+    return out;
+}
+
 QVariantMap ConversationStore::conversation(const QString &id) const
 {
     QVariantMap out;

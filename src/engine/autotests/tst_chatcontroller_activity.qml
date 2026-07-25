@@ -9,9 +9,16 @@ Item {
         function abort(){}
     } }
     QtObject { id: storeMock; property int _n: 0; property var appended: []
+        property var toolCalls: []
+        property var toolUpdates: []
+        property var toolCallsReply: []
+        property var messagesReply: []
         function newUuid(){ _n++; return "u"+_n } function appendMessage(m){ appended.push(m) }
         function updateMessage(i,f){} function deleteMessage(i){} function touchConversation(i,t){}
-        function messages(c){ return [] } function appendToolCall(t){} function updateToolCall(i,f){} }
+        function messages(c){ return messagesReply } function appendToolCall(t){ toolCalls.push(t) }
+        function updateToolCall(i,f){ toolUpdates.push({ "id": i, "fields": f }) }
+        function toolCallsForConversation(c){ return toolCallsReply }
+        function conversation(id){ return null } }
     QtObject { id: settingsMock; property int toolMaxRounds: 5; property string comfyDefaultModel: "z"
         function paramsFor(name) { return ({}) } }
     QtObject { id: registryMock; property var perm: ({})
@@ -34,7 +41,9 @@ Item {
         name: "ChatControllerActivity"
         function init(){ ctl.chatModel.clear(); ctl.conversationId=""; ctl._messages=[]
                          ctl.state="idle"; ctl._activeJob=null; registryMock.perm={}
-                         realGrants.clearConversation(""); storeMock.appended=[] }
+                         realGrants.clearConversation(""); storeMock.appended=[]
+                         storeMock.toolCalls=[]; storeMock.toolUpdates=[]
+                         storeMock.toolCallsReply=[]; storeMock.messagesReply=[] }
 
         function test_toolActivityReflectsRunAndDone() {
             ctl.send("Lies", null)
@@ -106,6 +115,57 @@ Item {
             var before = ctl._messages.length
             ctl.appendGeneratedImage("/m.png", "y", false)
             compare(ctl._messages.length, before + 1)                          // manuell: in _messages
+        }
+
+        // Persistenz-Spur (toolActivity-Reload): der Zug schreibt tool_calls-
+        // Zeilen (appendToolCall pending) und aktualisiert sie über den Lauf
+        // (running -> ok mit finishedAt + resultMessageId, gleiche dbId).
+        function test_toolCallsWerdenPersistiert() {
+            ctl.send("Lies", null)
+            lastJob.done({ content:"", thinking:"", toolCalls:[ call("read_file", { path:"/x" }) ] })
+            compare(storeMock.toolCalls.length, 1)
+            var tc = storeMock.toolCalls[0]
+            compare(tc.toolName, "read_file")
+            compare(tc.status, "pending")
+            compare(tc.callIndex, 0)
+            compare(tc.messageId, storeMock.appended[1].id)   // assistant-Zwischenzeile
+            var statuses = []
+            for (var i = 0; i < storeMock.toolUpdates.length; i++)
+                statuses.push(storeMock.toolUpdates[i].fields.status)
+            verify(statuses.indexOf("running") !== -1)
+            verify(statuses.indexOf("ok") !== -1)
+            var okUpd = null
+            for (var j = 0; j < storeMock.toolUpdates.length; j++)
+                if (storeMock.toolUpdates[j].fields.status === "ok") okUpd = storeMock.toolUpdates[j]
+            compare(okUpd.id, tc.id)                          // gleiche dbId
+            verify(okUpd.fields.finishedAt.length > 0)
+            verify(okUpd.fields.resultMessageId !== undefined && okUpd.fields.resultMessageId !== "")
+        }
+
+        // Reload: leere assistant-Zwischenzeile mit tool_calls-Spur bleibt als
+        // reine Chip-Bubble sichtbar (DB-"ok" -> UI-"done", Dauer aus den
+        // Zeitstempeln), geht aber NICHT in die API-History (_messages).
+        function test_reloadRestauriertToolActivity() {
+            storeMock.messagesReply = [
+                { id: "u1", role: "user", content: "Lies /x", createdAt: "2026-07-25T10:00:00.000", extra: ({}) },
+                { id: "a1", role: "assistant", content: "", createdAt: "2026-07-25T10:00:01.000", extra: ({}) }
+            ]
+            storeMock.toolCallsReply = [
+                { messageId: "a1", callIndex: 0, toolName: "read_file",
+                  arguments: ({ path: "/x" }), status: "ok",
+                  startedAt: "2026-07-25T10:00:01.100", finishedAt: "2026-07-25T10:00:02.600",
+                  resultMessageId: "t1" }
+            ]
+            ctl.loadConversation("c1")
+            compare(ctl.chatModel.count, 2)
+            var act = activityOf(1)
+            compare(act.length, 1)
+            compare(act[0].name, "read_file")
+            compare(act[0].status, "done")
+            compare(act[0].durationMs, 1500)
+            verify(act[0].describe.indexOf("/x") >= 0)
+            compare(ctl._messages.length, 1)
+            compare(ctl._messages[0].role, "user")
         }
     }
 }

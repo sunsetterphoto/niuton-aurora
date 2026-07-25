@@ -154,7 +154,9 @@ void Http::deleteJson(const QString &url, const QVariant &body, const QJSValue &
 void Http::downloadToFile(const QString &url, const QString &destPath, const QJSValue &callback, int timeoutMs)
 {
     QNetworkReply *reply = start(url, "GET", {}, timeoutMs);
-    connect(reply, &QNetworkReply::finished, this, [this, reply, destPath, callback]() {
+    m_downloads.insert(url, reply);
+    connect(reply, &QNetworkReply::finished, this, [this, reply, destPath, callback, url]() {
+        m_downloads.remove(url);
         reply->deleteLater();
         QVariantMap result;
         const int status = statusOf(reply);
@@ -202,4 +204,10 @@ void Http::downloadToFile(const QString &url, const QString &destPath, const QJS
         result[QStringLiteral("ok")] = true;
         invoke(callback, result);
     });
+}
+
+void Http::cancelDownload(const QString &url)
+{
+    QNetworkReply *reply = m_downloads.take(url);
+    if (reply) reply->abort();   // finished feuert danach mit OperationCanceledError
 }

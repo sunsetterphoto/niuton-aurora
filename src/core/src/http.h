@@ -28,6 +28,8 @@ public:
     // timeoutMs 0 = defaultTimeoutMs (Inaktivitäts-Timeout via setTransferTimeout)
     Q_INVOKABLE void getJson(const QString &url, const QJSValue &callback, int timeoutMs = 0);
     Q_INVOKABLE void postJson(const QString &url, const QVariant &body, const QJSValue &callback, int timeoutMs = 0);
+    // HTTP DELETE mit JSON-Body (Ollama /api/delete); gleiche Result-Form wie postJson
+    Q_INVOKABLE void deleteJson(const QString &url, const QVariant &body, const QJSValue &callback, int timeoutMs = 0);
     // callback(result): { ok, status, path, error } — legt Zielordner an, schreibt atomar (QSaveFile)
     Q_INVOKABLE void downloadToFile(const QString &url, const QString &destPath, const QJSValue &callback, int timeoutMs = 0);
 
@@ -35,7 +37,7 @@ Q_SIGNALS:
     void defaultTimeoutMsChanged();
 
 private:
-    QNetworkReply *start(const QString &url, bool post, const QByteArray &payload, int timeoutMs);
+    QNetworkReply *start(const QString &url, const QByteArray &method, const QByteArray &payload, int timeoutMs);
     void finishJson(QNetworkReply *reply, const QJSValue &callback);
     void invoke(const QJSValue &callback, const QVariantMap &result);
     static int statusOf(QNetworkReply *reply);

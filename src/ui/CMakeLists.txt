@@ -54,10 +54,17 @@ if(BUILD_TESTING)
         add_test(NAME ${name} COMMAND ${QMLTESTRUNNER_EXECUTABLE}
             -input ${CMAKE_CURRENT_SOURCE_DIR}/autotests/${name}.qml
             -import ${CMAKE_BINARY_DIR}/bin)
-        set_tests_properties(${name} PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+        set(_env "QT_QPA_PLATFORM=offscreen")
+        if(ARGN)
+            list(APPEND _env ${ARGN})
+        endif()
+        set_tests_properties(${name} PROPERTIES ENVIRONMENT "${_env}")
     endfunction()
     aurora_ui_qmltest(tst_theme)
     aurora_ui_qmltest(tst_modeltuner)
     aurora_ui_qmltest(tst_messagebubble)
     aurora_ui_qmltest(tst_knowledgeview)
+    # package/-KCM-Seiten lesen ConfigStore — AURORA_CONFIG_PATH gegen die echte rc abschotten
+    aurora_ui_qmltest(tst_packageconfig
+        "AURORA_CONFIG_PATH=${CMAKE_BINARY_DIR}/tst_packageconfig.rc")
 endif()

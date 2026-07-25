@@ -18,6 +18,11 @@ ConfigModel {
         source: "config/ConfigModels.qml"
     }
     ConfigCategory {
+        name: "Modell-Store"
+        icon: "download"
+        source: "config/ConfigModelStore.qml"
+    }
+    ConfigCategory {
         name: "Sprache"
         icon: "audio-input-microphone"
         source: "config/ConfigVoice.qml"

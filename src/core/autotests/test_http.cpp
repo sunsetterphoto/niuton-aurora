@@ -258,6 +258,38 @@ private Q_SLOTS:
         QVERIFY(!QFile::exists(dest));
     }
 
+    // Ollama /api/delete: DELETE mit JSON-Body {"name": "..."}.
+    void deleteJson_sendetMethodeBodyUndContentType()
+    {
+        TestHttpServer server;
+        server.setResponse(200, "");
+        HttpFixture f;
+        QVariantMap body;
+        body.insert("name", "qwen3.6:27b");
+        f.http->deleteJson(server.baseUrl() + "/api/delete", body, f.callback());
+        const QVariantMap r = f.wait();
+        QCOMPARE(r.value("ok").toBool(), true);
+        QCOMPARE(r.value("status").toInt(), 200);
+        QVERIFY(server.lastRequestHead.startsWith("DELETE /api/delete"));
+        QVERIFY(server.lastRequestHead.toLower().contains("content-type: application/json"));
+        QCOMPARE(QJsonDocument::fromJson(server.lastRequestBody),
+                 QJsonDocument::fromVariant(body));
+    }
+
+    // Nicht vorhandenes Modell -> 404 mit Ollama-Error-Body (wie postJson-404).
+    void deleteJson_http404_liefertFehlerUndBody()
+    {
+        TestHttpServer server;
+        server.setResponse(404, R"({"error":"model 'qwen3.6:27b' not found"})");
+        HttpFixture f;
+        f.http->deleteJson(server.baseUrl() + "/api/delete", QVariantMap(), f.callback());
+        const QVariantMap r = f.wait();
+        QCOMPARE(r.value("ok").toBool(), false);
+        QCOMPARE(r.value("status").toInt(), 404);
+        QCOMPARE(r.value("error").toString(), QString("HTTP 404"));
+        QVERIFY(r.value("data").toMap().value("error").toString().contains("not found"));
+    }
+
     void callbackNull_stuerztNichtAb()
     {
         TestHttpServer server;

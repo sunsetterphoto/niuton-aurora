@@ -26,15 +26,17 @@ void Http::setDefaultTimeoutMs(int ms)
     Q_EMIT defaultTimeoutMsChanged();
 }
 
-QNetworkReply *Http::start(const QString &url, bool post, const QByteArray &payload, int timeoutMs)
+QNetworkReply *Http::start(const QString &url, const QByteArray &method, const QByteArray &payload, int timeoutMs)
 {
     QNetworkRequest req{QUrl(url)};
     req.setTransferTimeout(timeoutMs > 0 ? timeoutMs : m_defaultTimeoutMs);
-    if (post) {
-        req.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
+    if (method == "GET")
+        return m_nam.get(req);
+    // POST und DELETE tragen einen JSON-Body (DELETE: Ollama /api/delete)
+    req.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
+    if (method == "POST")
         return m_nam.post(req, payload);
-    }
-    return m_nam.get(req);
+    return m_nam.sendCustomRequest(req, method, payload);
 }
 
 int Http::statusOf(QNetworkReply *reply)
@@ -127,7 +129,7 @@ void Http::finishJson(QNetworkReply *reply, const QJSValue &callback)
 
 void Http::getJson(const QString &url, const QJSValue &callback, int timeoutMs)
 {
-    finishJson(start(url, false, {}, timeoutMs), callback);
+    finishJson(start(url, "GET", {}, timeoutMs), callback);
 }
 
 QVariant Http::normalizeBody(const QVariant &body)
@@ -140,12 +142,18 @@ QVariant Http::normalizeBody(const QVariant &body)
 void Http::postJson(const QString &url, const QVariant &body, const QJSValue &callback, int timeoutMs)
 {
     const QByteArray payload = QJsonDocument::fromVariant(normalizeBody(body)).toJson(QJsonDocument::Compact);
-    finishJson(start(url, true, payload, timeoutMs), callback);
+    finishJson(start(url, "POST", payload, timeoutMs), callback);
+}
+
+void Http::deleteJson(const QString &url, const QVariant &body, const QJSValue &callback, int timeoutMs)
+{
+    const QByteArray payload = QJsonDocument::fromVariant(normalizeBody(body)).toJson(QJsonDocument::Compact);
+    finishJson(start(url, "DELETE", payload, timeoutMs), callback);
 }
 
 void Http::downloadToFile(const QString &url, const QString &destPath, const QJSValue &callback, int timeoutMs)
 {
-    QNetworkReply *reply = start(url, false, {}, timeoutMs);
+    QNetworkReply *reply = start(url, "GET", {}, timeoutMs);
     connect(reply, &QNetworkReply::finished, this, [this, reply, destPath, callback]() {
         reply->deleteLater();
         QVariantMap result;

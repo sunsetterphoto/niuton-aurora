@@ -13,6 +13,7 @@ ecm_target_qml_sources(auroraengine SOURCES
     qml/OllamaClient.qml
     qml/ChatJob.qml
     qml/ModelManager.qml
+    qml/ModelStore.qml
     qml/ChatController.qml
     qml/Tool.qml
     qml/ToolRegistry.qml
@@ -94,4 +95,5 @@ if(BUILD_TESTING)
     aurora_engine_qmltest(tst_conversationexport)
     aurora_engine_qmltest(tst_comfyclient
         "XDG_DATA_HOME=${CMAKE_BINARY_DIR}/tst_comfyclient_data")
+    aurora_engine_qmltest(tst_modelstore)
 endif()

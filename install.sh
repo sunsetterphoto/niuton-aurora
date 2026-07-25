@@ -82,7 +82,17 @@ case ":$current:" in
 esac
 
 echo "[5/5] Starte plasmashell neu..."
-systemctl --user restart plasma-plasmashell.service
+# Plasma 6 führt plasmashell je nach Session-Modus als plasma-plasmashell.service
+# ODER als transiente app-plasmashell@<hash>.service. Die TATSÄCHLICH laufende
+# Unit neustarten — ein Restart der falschen (toten) Unit lässt die alte Shell
+# mit dem alten Widget-Stand weiterlaufen (25.07. live passiert).
+_unit=$(systemctl --user list-units --type=service --state=running --no-legend \
+        | awk '{print $1}' | grep -E '^app-plasmashell@.*\.service$' | head -1 || true)
+if [ -n "$_unit" ]; then
+    systemctl --user restart "$_unit"
+else
+    systemctl --user restart plasma-plasmashell.service
+fi
 
 echo ""
 echo "=== Fertig ==="

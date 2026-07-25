@@ -70,19 +70,18 @@ PlasmoidItem {
         property real _time: 0
 
         Timer {
-            interval: 50
-            // Nicht rund um die Uhr mit 20 fps repainten (Idle-Last der
-            // plasmashell/Akku): die Animation läuft nur, solange Aurora
-            // arbeitet (dann schneller) oder das Popup geöffnet ist. Beim
-            // Stoppen ein letzter Frame, damit das Ruhe-Bild (gedimmte
-            // Alpha/Border) statt des letzten Lade-Frames stehen bleibt.
-            running: root.isLoading || root.expanded
+            // Lebendiges Icon ohne Dauer-Last: im Leerlauf ruhiges 4-fps-Atmen,
+            // bei Arbeit (isLoading) oder geöffnetem Popup volle 20 fps.
+            // (18.07. lief die Animation nur unter Last/gar nicht — das stand
+            // still wirkende Ruhe-Icon wurde als „bewegt sich nicht mehr"
+            // wahrgenommen; die adaptive Stufe ist der Mittelweg.)
+            interval: (root.isLoading || root.expanded) ? 50 : 250
+            running: true
             repeat: true
             onTriggered: {
                 compactMouse._time += 0.05
                 auroraCanvas.requestPaint()
             }
-            onRunningChanged: if (!running) auroraCanvas.requestPaint()
         }
 
         Canvas {

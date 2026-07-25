@@ -20,6 +20,9 @@
     <entry name="unloadSeconds" type="Int">
       <default>300</default>
     </entry>
+    <entry name="panelIconAnimation" type="String">
+      <default>calm</default>
+    </entry>
     <entry name="twoPhaseToolCalls" type="Bool">
       <default>false</default>
     </entry>

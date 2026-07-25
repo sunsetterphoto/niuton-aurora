@@ -18,6 +18,7 @@ const QVariantMap &ConfigStore::defaults()
         { QStringLiteral("remoteEndpoint"),         QString() },
         { QStringLiteral("remoteEndpointFallback"), QString() },
         { QStringLiteral("unloadSeconds"),          300 },
+        { QStringLiteral("panelIconAnimation"),     QStringLiteral("calm") },
         { QStringLiteral("twoPhaseToolCalls"),      false },
         { QStringLiteral("toolWebSearch"),          QStringLiteral("auto") },
         { QStringLiteral("toolReadFile"),           QStringLiteral("auto") },

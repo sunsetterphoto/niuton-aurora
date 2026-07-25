@@ -101,6 +101,9 @@
     <entry name="comfyDefaultModel" type="String">
       <default>z_image_turbo</default>
     </entry>
+    <entry name="comfyFreeVram" type="Bool">
+      <default>true</default>
+    </entry>
   </group>
 
   <group name="Services">

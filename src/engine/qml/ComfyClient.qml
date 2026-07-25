@@ -42,6 +42,28 @@ Item {
         { "value": "z_image", "label": "Z-Image (Qualität)" }
     ]
 
+    // Nach Laufende Modelle serverseitig entladen (POST /free): Auf einer
+    // gemeinsamen GPU (z. B. 16 GB) belegt ComfyUI sonst dauerhaft VRAM und
+    // das LLM-Backend fällt beim nächsten Laden auf die CPU zurück.
+    // Best-effort: Fehler werden ignoriert. Config-Key comfyFreeVram.
+    property bool freeVramAfterRun: true
+    // Verzögerung für die Freigabe nach cancel(): der Server rendert den
+    // Prompt zu Ende (ComfyUI kann von hier nicht abgebrochen werden) — ein
+    // sofortiges /free wäre ein no-op, weil die Modelle in Benutzung sind.
+    property int cancelFreeDelayMs: 120000
+
+    function _freeVram() {
+        if (!freeVramAfterRun || effectiveEndpoint === "") return
+        comfy.http.postJson(effectiveEndpoint + "/free",
+            { "unload_models": true, "free_memory": true }, function(res) {}, 10000)
+    }
+
+    property Timer cancelFreeTimer: Timer {
+        interval: comfy.cancelFreeDelayMs
+        repeat: false
+        onTriggered: comfy._freeVram()
+    }
+
     signal finished(string imagePath, string promptText)
     signal failed(string message)
 
@@ -142,6 +164,7 @@ Item {
     function generate(params) {
         if (busy) { failed("Es läuft bereits eine Generierung"); return }
         _run += 1    // neuer Lauf: alle noch unterwegs befindlichen alten Callbacks verwerfen
+        cancelFreeTimer.stop()   // kein /free mitten im neuen Lauf
         busy = true
         statusText = "Lade Workflow..."
         _promptText = params.prompt
@@ -183,6 +206,8 @@ Item {
         busy = false
         statusText = ""
         toolInitiated = false
+        // Server rendert zu Ende; Modelle danach verzögert entladen (s. cancelFreeDelayMs).
+        if (effectiveEndpoint !== "") cancelFreeTimer.restart()
     }
 
     function _submit(wf) {
@@ -227,6 +252,7 @@ Item {
             var st = entry.status || {}
             if (st.status_str === "error") {
                 comfy._fail("ComfyUI-Fehler bei der Ausführung")
+                comfy._freeVram()   // Ausführung lief an: Modelle können geladen sein
                 return
             }
             if (st.completed) {
@@ -239,6 +265,7 @@ Item {
                     }
                 }
                 comfy._fail("Kein Bild in der Ausgabe")
+                comfy._freeVram()
             }
         })
     }
@@ -260,6 +287,7 @@ Item {
                 comfy.failed("Bild konnte nicht gespeichert werden")
             }
             comfy.toolInitiated = false    // Lauf abgeschlossen -> Markierung zurücksetzen
+            comfy._freeVram()   // Lauf zu Ende (Bild geholt): VRAM wieder fürs LLM freigeben
         }, 60000)
     }
 

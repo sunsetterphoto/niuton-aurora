@@ -15,7 +15,80 @@ KCM.SimpleKCM {
     // Defekt aussehen (analog zum Remote-/Comfy-testStatus).
     property string localStatus: ""
 
-    Component.onCompleted: refreshLocalModels()
+    // --- Inferenz-Status -----------------------------------------------
+    // Zeigt pro erreichbarem Ollama-Backend, welche Modelle geladen sind und
+    // ob sie im GPU-VRAM oder auf der CPU rechnen. Quelle: /api/ps
+    // (size_vram vs. size). Polling alle 5 s, solange die Seite sichtbar ist.
+    property string inferLocalText: ""
+    property string inferLocalLevel: ""   // "gpu" | "partial" | "cpu" | "off" | "down" | ""
+    property string inferRemoteText: ""
+    property string inferRemoteLevel: ""
+    property bool inferRemoteWanted: false
+
+    Component.onCompleted: {
+        refreshLocalModels()
+        refreshInfer()
+    }
+
+    function _fmtVRAM(b) { return (Math.round(b / 1e8) / 10) + " GB" }
+
+    function _levelColor(level) {
+        if (level === "gpu") return Kirigami.Theme.positiveTextColor
+        if (level === "partial") return Kirigami.Theme.neutralTextColor
+        if (level === "cpu") return Kirigami.Theme.negativeTextColor
+        return Kirigami.Theme.textColor
+    }
+
+    function _inferFromPs(res, label) {
+        if (!res.ok) return { text: label + ": nicht erreichbar", level: "down" }
+        var models = (res.data && res.data.models) || []
+        if (models.length === 0) return { text: label + ": kein Modell geladen", level: "off" }
+        var parts = []
+        var worst = "gpu"
+        for (var i = 0; i < models.length; i++) {
+            var m = models[i]
+            var vram = m.size_vram || 0
+            var size = m.size || 0
+            if (vram <= 0) {
+                parts.push(m.name + " — CPU (kein VRAM belegt)")
+                worst = "cpu"
+            } else if (vram >= size * 0.98) {
+                parts.push(m.name + " — GPU (" + _fmtVRAM(vram) + " im VRAM)")
+            } else {
+                parts.push(m.name + " — GPU teilweise (" + _fmtVRAM(vram) + " von " + _fmtVRAM(size) + " im VRAM)")
+                if (worst === "gpu") worst = "partial"
+            }
+        }
+        return { text: label + ":\n" + parts.join("\n"), level: worst }
+    }
+
+    function refreshInfer() {
+        Http.getJson("http://127.0.0.1:11434/api/ps", function(res) {
+            var r = root._inferFromPs(res, "Lokal (127.0.0.1)")
+            root.inferLocalText = r.text
+            root.inferLocalLevel = r.level
+        })
+        var ep = (ConfigStore.value("remoteEndpoint") || "").trim()
+        root.inferRemoteWanted = !!ConfigStore.value("remoteEnabled") && ep !== ""
+        if (root.inferRemoteWanted) {
+            var short = ep.replace(/^https?:\/\//, "")
+            Http.getJson(ep + "/api/ps", function(res) {
+                var r2 = root._inferFromPs(res, "Remote (" + short + ")")
+                root.inferRemoteText = r2.text
+                root.inferRemoteLevel = r2.level
+            })
+        } else {
+            root.inferRemoteText = ""
+            root.inferRemoteLevel = ""
+        }
+    }
+
+    Timer {
+        interval: 5000
+        repeat: true
+        running: root.visible
+        onTriggered: root.refreshInfer()
+    }
 
     function refreshLocalModels() {
         Http.getJson("http://127.0.0.1:11434/api/tags", function(res) {
@@ -66,6 +139,36 @@ KCM.SimpleKCM {
     }
 
     Kirigami.FormLayout {
+        Kirigami.Separator {
+            Kirigami.FormData.isSection: true
+            Kirigami.FormData.label: "Inferenz-Status"
+        }
+
+        QQC2.Label {
+            Kirigami.FormData.label: "Recheneinheit:"
+            text: root.inferLocalText !== "" ? root.inferLocalText : "Lokal (127.0.0.1): …"
+            color: root._levelColor(root.inferLocalLevel)
+            wrapMode: Text.Wrap
+            Layout.maximumWidth: Kirigami.Units.gridUnit * 25
+        }
+
+        QQC2.Label {
+            visible: root.inferRemoteWanted
+            text: root.inferRemoteText !== "" ? root.inferRemoteText : "Remote: …"
+            color: root._levelColor(root.inferRemoteLevel)
+            wrapMode: Text.Wrap
+            Layout.maximumWidth: Kirigami.Units.gridUnit * 25
+        }
+
+        QQC2.Label {
+            visible: root.inferLocalLevel === "cpu"
+            text: "Das Modell rechnet auf der CPU. Häufige Ursachen: VRAM durch andere Prozesse belegt (z. B. ComfyUI) oder Ollama wurde vor dem GPU-Treiber gestartet — dann hilft: systemctl restart ollama"
+            wrapMode: Text.Wrap
+            opacity: 0.8
+            color: Kirigami.Theme.negativeTextColor
+            Layout.maximumWidth: Kirigami.Units.gridUnit * 25
+        }
+
         Kirigami.Separator {
             Kirigami.FormData.isSection: true
             Kirigami.FormData.label: "Auto-Modus: Energieprofil → lokales Modell"
@@ -183,6 +286,22 @@ KCM.SimpleKCM {
             ]
             Component.onCompleted: currentIndex = Math.max(0, indexOfValue(ConfigStore.value("comfyDefaultModel")))
             onActivated: ConfigStore.setValue("comfyDefaultModel", currentValue)
+        }
+
+        QQC2.CheckBox {
+            Kirigami.FormData.label: "VRAM:"
+            text: "Nach Generierung freigeben"
+            enabled: comfyEnabledBox.checked
+            checked: (ConfigStore.revision, ConfigStore.value("comfyFreeVram"))
+            onToggled: ConfigStore.setValue("comfyFreeVram", checked)
+        }
+
+        QQC2.Label {
+            visible: comfyEnabledBox.checked
+            text: "Empfohlen, wenn ComfyUI und das Sprachmodell dieselbe GPU nutzen — sonst fällt Ollama beim nächsten Laden auf die CPU zurück."
+            wrapMode: Text.Wrap
+            opacity: 0.7
+            Layout.maximumWidth: Kirigami.Units.gridUnit * 25
         }
 
         QQC2.Label {

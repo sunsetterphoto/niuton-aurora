@@ -31,6 +31,7 @@ const QVariantMap &ConfigStore::defaults()
         { QStringLiteral("comfyEndpoint"),          QString() },
         { QStringLiteral("comfyEndpointLocal"),     QStringLiteral("http://127.0.0.1:8188") },
         { QStringLiteral("comfyDefaultModel"),      QStringLiteral("z_image_turbo") },
+        { QStringLiteral("comfyFreeVram"),          true },
         { QStringLiteral("speachesEnabled"),        true },
         { QStringLiteral("speachesEndpoint"),       QStringLiteral("http://127.0.0.1:8000") },
         { QStringLiteral("speachesSttModel"),       QStringLiteral("Systran/faster-whisper-large-v3") },

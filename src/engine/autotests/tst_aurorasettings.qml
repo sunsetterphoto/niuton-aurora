@@ -36,6 +36,7 @@ TestCase {
         compare(s.comfyEndpoint, "")
         compare(s.comfyEnabled, true)
         compare(s.comfyDefaultModel, "z_image_turbo")
+        compare(s.comfyFreeVram, true)
         compare(s.searchEndpoint, "http://127.0.0.1:8888")
         compare(s.ttsVoice, "de_DE-thorsten-high")
         compare(s.ttsAutoSpeak, false)

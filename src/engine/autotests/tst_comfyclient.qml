@@ -21,6 +21,87 @@ TestCase {
     // die Haupt-Instanz bleibt mit dem echten Singleton im Fire-and-forget-Modus.
     ComfyClient { id: comfy2 }
 
+    // Dritte Instanz für vollständig gemockte Generierungs-Läufe (/prompt →
+    // /history → /view → /free) — deckt die VRAM-Auto-Freigabe ab.
+    ComfyClient { id: comfy3 }
+
+    property var laufCalls: []
+    function _laufMock() {
+        return {
+            getJson: function(url, cb, t) { laufCalls.push({ "url": url, "cb": cb }) },
+            postJson: function(url, body, cb, t) { laufCalls.push({ "url": url, "body": body, "cb": cb }) },
+            downloadToFile: function(url, dest, cb, t) { laufCalls.push({ "url": url, "dest": dest, "cb": cb }) }
+        }
+    }
+    function _lastCall(part) {
+        for (var i = laufCalls.length - 1; i >= 0; i--)
+            if (laufCalls[i].url.indexOf(part) !== -1) return laufCalls[i]
+        return null
+    }
+    function _resetComfy3() {
+        comfy3.endpoint = ""
+        comfy3.localEndpoint = ""
+        comfy3.freeVramAfterRun = true
+        comfy3.cancelFreeDelayMs = 120000
+        laufCalls = []
+    }
+
+    // Treibt einen kompletten Lauf bis zum Download-Callback; erwartet,
+    // dass /free danach aufgerufen wurde (wantFree) oder eben nicht.
+    function _driveLauf(wantFree) {
+        verify(_writeOkTemplate().ok)
+        laufCalls = []
+        comfy3.http = _laufMock()
+        comfy3.localEndpoint = ""
+        comfy3.endpoint = "http://fern:8000"
+        comfy3.freeVramAfterRun = wantFree
+        comfy3.generate({ prompt: "Baum", model: "tst_comfy_ok" })
+        _lastCall("/prompt").cb({ "ok": true, "data": { "prompt_id": "p1" } })
+        tryVerify(function() { return _lastCall("/history/") !== null }, 4000)
+        _lastCall("/history/").cb({ "ok": true, "data": { "p1": {
+            "status": { "completed": true },
+            "outputs": { "9": { "images": [ { "filename": "x.png", "subfolder": "", "type": "output" } ] } }
+        } } })
+        tryVerify(function() { return _lastCall("/view?") !== null }, 2000)
+        _lastCall("/view?").cb({ "ok": true, "path": "/tmp/x.png" })
+    }
+
+    function test_freeVramNachErfolgreichemLauf() {
+        _driveLauf(true)
+        var c = _lastCall("/free")
+        verify(c !== null)
+        compare(c.url, "http://fern:8000/free")
+        compare(c.body.unload_models, true)
+        compare(c.body.free_memory, true)
+        compare(comfy3.busy, false)
+        _resetComfy3()
+    }
+
+    function test_freeVramDeaktiviertSchweigt() {
+        _driveLauf(false)
+        compare(_lastCall("/free"), null)
+        compare(comfy3.busy, false)
+        _resetComfy3()
+    }
+
+    // cancel(): der Server rendert zu Ende — die Freigabe kommt verzögert
+    // (cancelFreeDelayMs), nicht sofort (sofort wäre ein no-op).
+    function test_cancelPlantVerzoegerteFreigabe() {
+        verify(_writeOkTemplate().ok)
+        laufCalls = []
+        comfy3.http = _laufMock()
+        comfy3.localEndpoint = ""
+        comfy3.endpoint = "http://fern:8000"
+        comfy3.cancelFreeDelayMs = 30
+        comfy3.generate({ prompt: "Baum", model: "tst_comfy_ok" })
+        compare(comfy3.busy, true)
+        comfy3.cancel()
+        compare(comfy3.busy, false)
+        compare(_lastCall("/free"), null)   // nicht sofort
+        tryVerify(function() { return _lastCall("/free") !== null }, 3000)
+        _resetComfy3()
+    }
+
     property var httpCalls: []
     function _mockHttp() {
         return {

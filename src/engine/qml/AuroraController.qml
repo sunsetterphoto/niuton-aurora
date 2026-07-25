@@ -163,6 +163,7 @@ QtObject {
         endpoint: settings.comfyEnabled ? (settings.comfyEndpoint || "") : ""
         localEndpoint: settings.comfyEnabled ? settings.comfyEndpointLocal : ""
         autoStart: settings.comfyEnabled ? settings.servicesAutoStart : false
+        freeVramAfterRun: settings.comfyFreeVram
         // Dieser Handler rendert BEIDE Wege ins Chat-Modell (Tool-Weg wie manueller
         // ImagePanel-Weg — appendGeneratedImage ist die EINZIGE Funktion, die eine
         // bild-tragende Chat-Zeile erzeugt). Task 4, zwei Aspekte:

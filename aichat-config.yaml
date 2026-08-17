@@ -24,3 +24,9 @@ clients:
       - name: aurora
       - name: qwen3.5:9b
       - name: qwen2.5-coder:14b
+  - type: openai-compatible
+    name: bonsai
+    api_base: http://localhost:8080/v1
+    api_key: null
+    models:
+      - name: bonsai-27b-ternary

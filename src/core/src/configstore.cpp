@@ -45,6 +45,11 @@ const QVariantMap &ConfigStore::defaults()
         // Leer = Standardpfad. Gesetzt: Ordner für aurora.db — erlaubt es,
         // die Daten in eine selbst betriebene Cloud (Nextcloud o.ä.) zu legen.
         { QStringLiteral("dataPath"),               QString() },
+        // OpenAI-kompatibles Backend im eigenen Netz (llama-server, vLLM):
+        // leer = keins. Kein Default-Port, damit nichts unaufgefordert probt.
+        { QStringLiteral("openaiEndpoint"),         QString() },
+        // Einziges Backend, das Daten aus dem Haus gibt — daher opt-in.
+        { QStringLiteral("openrouterEnabled"),      false },
         { QStringLiteral("embedModel"),             QStringLiteral("nomic-embed-text") },
         { QStringLiteral("ragEnabled"),             true },
         { QStringLiteral("ragTopK"),                3 },

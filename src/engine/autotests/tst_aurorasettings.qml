@@ -102,4 +102,86 @@ TestCase {
         ConfigStore.setValue("embedModel", "mxbai-embed-large")
         compare(s.embedModel, "mxbai-embed-large")
     }
+
+    // ---------- Backend-Registry ----------
+
+    function _ids(list) {
+        var out = []
+        for (var i = 0; i < list.length; i++) out.push(list[i].id)
+        return out
+    }
+    function _byId(list, id) {
+        for (var i = 0; i < list.length; i++) if (list[i].id === id) return list[i]
+        return null
+    }
+
+    // Das lokale Ollama ist immer da und steht immer vorn: die Probe-Reihenfolge
+    // ist zugleich die Vorrangfolge, und lokal geht vor allem anderen.
+    function test_backendsEnthaeltImmerLokal() {
+        compare(_ids(s.backends), ["local"])
+        var l = s.backends[0]
+        compare(l.kind, "ollama")
+        compare(l.endpoint, "http://127.0.0.1:11434")
+        compare(l.cloud, false)
+    }
+
+    function test_netzwerkBackendsInKonfigurierterReihenfolge() {
+        ConfigStore.setValue("remoteEnabled", true)
+        ConfigStore.setValue("remoteEndpoint", "http://192.168.1.10:11434")
+        ConfigStore.setValue("remoteEndpointFallback", "http://192.168.1.11:11434")
+        compare(_ids(s.backends), ["local", "lan1", "lan2"])
+        compare(_byId(s.backends, "lan1").endpoint, "http://192.168.1.10:11434")
+        compare(_byId(s.backends, "lan1").kind, "ollama")
+        compare(_byId(s.backends, "lan1").cloud, false)
+    }
+
+    // remoteEnabled=false blendet die Netzwerk-Backends aus, ohne die
+    // eingetragenen Adressen zu verlieren.
+    function test_netzwerkAbgeschaltetErscheintNicht() {
+        ConfigStore.setValue("remoteEndpoint", "http://192.168.1.10:11434")
+        ConfigStore.setValue("remoteEnabled", false)
+        compare(_ids(s.backends), ["local"])
+    }
+
+    // llama-server (Bonsai): OpenAI-Protokoll, aber lokal — also kein Cloud-Flag.
+    function test_openaiBackendIstNichtCloud() {
+        ConfigStore.setValue("openaiEndpoint", "http://127.0.0.1:8080")
+        var b = _byId(s.backends, "openai")
+        verify(b !== null)
+        compare(b.kind, "openai")
+        compare(b.cloud, false)
+        compare(b.endpoint, "http://127.0.0.1:8080")
+    }
+
+    // OpenRouter ist das einzige Backend, das Daten aus dem Haus gibt — das
+    // Flag steuert später Kennzeichnung und Auto-Modus-Ausschluss.
+    function test_openrouterIstCloudUndOptional() {
+        compare(_byId(s.backends, "openrouter"), null)   // Default: aus
+        ConfigStore.setValue("openrouterEnabled", true)
+        var b = _byId(s.backends, "openrouter")
+        verify(b !== null)
+        compare(b.kind, "openai")
+        compare(b.cloud, true)
+        compare(b.endpoint, "https://openrouter.ai/api/v1")
+        compare(b.keyRef, "openrouter")
+    }
+
+    // Cloud steht immer hinten: die Probe nimmt den niedrigsten Index, und
+    // lokal soll gewinnen, solange irgendetwas lokal antwortet.
+    function test_cloudStehtHinterAllenLokalen() {
+        ConfigStore.setValue("openrouterEnabled", true)
+        ConfigStore.setValue("openaiEndpoint", "http://127.0.0.1:8080")
+        ConfigStore.setValue("remoteEnabled", true)
+        ConfigStore.setValue("remoteEndpoint", "http://192.168.1.10:11434")
+        var ids = _ids(s.backends)
+        compare(ids[ids.length - 1], "openrouter")
+        for (var i = 0; i < s.backends.length - 1; i++)
+            compare(s.backends[i].cloud, false)
+    }
+
+    function test_backendsAktualisierenSichBeiConfigAenderung() {
+        compare(s.backends.length, 1)
+        ConfigStore.setValue("openaiEndpoint", "http://127.0.0.1:8080")
+        compare(s.backends.length, 2)
+    }
 }

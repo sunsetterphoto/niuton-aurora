@@ -31,6 +31,7 @@ QtObject {
     property int ragTopK: ConfigStore.value("ragTopK")
     property double ragThreshold: ConfigStore.value("ragThreshold")
     property var remoteEndpoints: settings._computeRemoteEndpoints()
+    property var backends: settings._computeBackends()
     property int unloadSeconds: ConfigStore.value("unloadSeconds")
 
     // Tools (kanonisch "off" | "auto" | "confirm")
@@ -75,6 +76,40 @@ QtObject {
         return eps
     }
 
+    // Backend-Registry: die eine Liste, über die der ModelManager läuft. Sie
+    // ersetzt das feste Paar lokal/remote — jeder Eintrag nennt seine Sorte,
+    // und die Sorte bestimmt den Client (OllamaClient bzw. OpenAiClient).
+    //
+    // Die REIHENFOLGE ist bedeutungstragend: die Probe nimmt den niedrigsten
+    // Index, der antwortet. Deshalb steht das lokale Ollama vorn und alles mit
+    // cloud:true hinten — solange hier etwas antwortet, geht nichts nach außen.
+    function _computeBackends() {
+        var out = [{ "id": "local", "kind": "ollama",
+                     "endpoint": "http://127.0.0.1:11434",
+                     "label": "Lokal", "cloud": false }]
+        // Ollama im eigenen Netz (LAN vor WLAN: Reihenfolge wie konfiguriert)
+        if (ConfigStore.value("remoteEnabled")) {
+            var a = ConfigStore.value("remoteEndpoint")
+            var b = ConfigStore.value("remoteEndpointFallback")
+            if (a) out.push({ "id": "lan1", "kind": "ollama", "endpoint": a,
+                              "label": "Netzwerk", "cloud": false })
+            if (b) out.push({ "id": "lan2", "kind": "ollama", "endpoint": b,
+                              "label": "Netzwerk (2)", "cloud": false })
+        }
+        // OpenAI-Protokoll, aber im eigenen Netz (llama-server mit Bonsai):
+        // dasselbe Vertrauensniveau wie Ollama, deshalb kein Cloud-Flag.
+        var oa = ConfigStore.value("openaiEndpoint")
+        if (oa) out.push({ "id": "openai", "kind": "openai", "endpoint": oa,
+                           "label": "llama-server", "cloud": false })
+        // Cloud zuletzt und nur auf ausdrücklichen Wunsch.
+        if (ConfigStore.value("openrouterEnabled"))
+            out.push({ "id": "openrouter", "kind": "openai",
+                       "endpoint": "https://openrouter.ai/api/v1",
+                       "label": "OpenRouter", "cloud": true,
+                       "keyRef": "openrouter" })
+        return out
+    }
+
     // Alle Werte aus dem ConfigStore neu einlesen (bei jeder revision-Änderung).
     function _sync() {
         modelLowPower = ConfigStore.value("modelLowPower")
@@ -110,6 +145,7 @@ QtObject {
         sttSource = ConfigStore.value("sttSource")
         modelParams = _parseModelParams()
         remoteEndpoints = _computeRemoteEndpoints()
+        backends = _computeBackends()
     }
 
     property Connections _revisionConn: Connections {

@@ -5,16 +5,20 @@
 # Aurora
 
 **Local-first AI assistant for KDE Plasma 6** — available both as a panel widget and a
-standalone app, sharing one engine. Aurora talks to a local (or remote) [Ollama](https://ollama.com)
-server, generates images via ComfyUI, and supports voice input/output — favouring local, private
-processing.
+standalone app, sharing one engine. Aurora talks to [Ollama](https://ollama.com) and to
+OpenAI-compatible servers such as [llama.cpp](https://github.com/ggml-org/llama.cpp)'s
+`llama-server`, generates images via ComfyUI, and supports voice input/output.
+
+Data sovereignty is the guiding rule, not physical location: your own machine, your own LAN and
+your own cloud storage rank equally; a third-party cloud is the deliberate exception.
 
 > The user interface is currently in German; Aurora itself replies in the language you write in.
 
 ## Features
 
-- **Local & remote models** over the Ollama protocol — one code path. Auto mode picks a local
-  model per power profile; an optional remote server (LAN with WLAN fallback) is probed in parallel.
+- **Several model backends, one interface**: local Ollama, Ollama on your LAN (probed in parallel,
+  with fallback), and OpenAI-compatible servers. Auto mode picks a local model per power profile
+  and never reaches for a cloud backend on its own.
 - **Streaming chat** with separate "thinking" output and **tool calling**: web search, read file,
   list directory, fetch URL, run command (with confirmation), and image generation. Per-tool
   permissions (auto / confirm).
@@ -55,29 +59,45 @@ cd niuton-aurora
 ./install.sh
 ```
 
-The guided installer:
+The installer is non-interactive and idempotent:
 
-1. installs the system dependencies (on Fedora via `dnf`; on other distros it lists the packages),
-2. builds and runs the test suite,
-3. installs the widget and QML modules into `~/.local`, and sets the QML import path,
-4. asks for an optional **remote Ollama endpoint** (leave empty for local-only),
-5. offers to download models and voices (`setup-assets.sh`, several GB).
+1. checks the build dependencies (and lists the `dnf` command if any are missing),
+2. builds and runs the test suite — it stops on a failing test,
+3. installs the widget, QML modules and the `aurora` binary into `~/.local`, sets the QML import
+   path, and restarts plasmashell.
 
 Then add the widget (right-click the panel → **Add Widgets** → **Aurora**) or launch the standalone
-app (`aurora`).
+app (`aurora`). Models and voices are fetched separately via `./setup-assets.sh` (several GB).
 
-Run `./install.sh --yes` for a non-interactive install.
+`./install.sh --with-quadlets` additionally copies the Podman quadlets for ComfyUI and Speaches to
+`~/.config/containers/systemd/`. Existing files are never overwritten, and the units carry no
+`[Install]` section — nothing autostarts.
 
 ## Configuration
 
-- **Remote endpoint**: set during install, or any time via **Settings → Models** (endpoint plus an
-  optional fallback).
+- **Backends**: an Ollama endpoint on your LAN plus an optional fallback under
+  **Settings → Models**; an OpenAI-compatible endpoint (`openaiEndpoint`) for `llama-server` and
+  friends.
 - **Models**: local model per power profile (auto mode) and the embedding model (default
   `nomic-embed-text`).
 - **Tools**: per-tool permission (auto / confirm) under Settings.
+- **Data directory**: **Settings → Advanced → Datenordner** moves `aurora.db` anywhere you like —
+  a synced folder of your own cloud, for instance. Empty means the default path. If you do use a
+  sync folder: exclude `aurora.db-wal` and `aurora.db-shm` from syncing (SQLite runs in WAL mode)
+  and do not run Aurora against the same folder from two machines at once.
 
 Configuration is stored in `~/.config/net.niuton.aurora.rc`; data (conversations, knowledge base,
-images, voices) under `~/.local/share/aurora/`.
+images, voices) under `~/.local/share/aurora/` unless you moved it.
+
+### Ports
+
+| Port | Service |
+|------|---------|
+| 11434 | Ollama |
+| 8080 | `llama-server` (OpenAI-compatible), see `aurora-llama-server.service` |
+| 8188 | ComfyUI |
+| 8000 | Speaches (speech) |
+| 8001 | `aichat --serve` (optional bash integration) |
 
 ## Architecture
 
@@ -86,12 +106,24 @@ Three QML modules:
 - **`net.niuton.aurora.core`** — C++/QML singletons: `FileIO`, `Http`, `NdjsonStream`,
   `ProcessRunner`, `ConversationStore` (SQLite), `ConfigStore`.
 - **`net.niuton.aurora.engine`** — `AuroraController` / `AuroraEngine`, `ModelManager`,
-  `ChatController`, `OllamaClient`, prompt/command helpers.
+  `ChatController`, the backend clients (`OllamaClient`, `OpenAiClient`) and their job objects,
+  prompt/command helpers.
 - **`net.niuton.aurora.ui`** — `Theme`, the views (`ChatView`, `Header`, `Sidebar`, `KnowledgeView`,
   `ImagePanel`, …) and `MainView`.
 
-Conversations and the knowledge base live in SQLite (`~/.local/share/aurora/aurora.db`). All model
-backends speak the Ollama protocol, so local and remote share one path.
+Conversations and the knowledge base live in one SQLite database (`aurora.db`; the directory is
+configurable).
+
+Backends are held in a registry derived from the settings. Each entry names its `kind`, and that
+decides which client serves it — `OllamaClient` or `OpenAiClient`. The order carries meaning:
+probing takes the lowest index that answers, so local Ollama comes first and anything marked
+`cloud` comes last. The flag marks the trust boundary, not the protocol: a `llama-server` on your
+own machine speaks the OpenAI protocol but is not cloud.
+
+`OpenAiClient` mirrors the `OllamaClient` surface so the manager can hold both interchangeably. It
+reassembles the fragmented delta format on the way in: OpenAI streams tool-call arguments as a JSON
+*string* over arbitrarily many chunks, while `ChatController` expects Ollama's shape (arguments as
+an object).
 
 ## Bash integration (optional)
 

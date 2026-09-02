@@ -463,4 +463,85 @@ TestCase {
         ConfigStore.setValue("modelsRevision", "2026-07-25T12:01:00")
         verify(mockHttp.find("http://local:11434/api/tags", n) !== -1)
     }
+
+    // ---------- Backend-Registry: mehr als lokal + remote ----------
+
+    // Ein OpenAI-Backend (llama-server mit Bonsai) spricht ein anderes
+    // Protokoll: /v1/models statt /api/tags.
+    function test_openaiBackendWirdMitV1ModelsGeprobt() {
+        ConfigStore.setValue("openaiEndpoint", "http://llama:8080")
+        mgr.refresh()
+        var i = mockHttp.find("http://llama:8080/v1/models")
+        verify(i !== -1)
+    }
+
+    function test_openaiModelleErscheinenImPicker() {
+        ConfigStore.setValue("openaiEndpoint", "http://llama:8080")
+        mgr.refresh()
+        var i = mockHttp.find("http://llama:8080/v1/models")
+        mockHttp.answer(i, { "ok": true, "data": { "data": [
+            { "id": "bonsai-27b-ternary" }] } })
+        var gefunden = false
+        for (var k = 0; k < mgr.pickerEntries.length; k++)
+            if (mgr.pickerEntries[k].value === "openai:bonsai-27b-ternary") gefunden = true
+        verify(gefunden)
+    }
+
+    // Auswahl eines OpenAI-Modells: chat() muss an DESSEN Endpunkt gehen,
+    // nicht an das lokale Ollama.
+    function test_auswahlOpenaiLeitetChatDorthin() {
+        ConfigStore.setValue("openaiEndpoint", "http://llama:8080")
+        mgr.refresh()
+        var i = mockHttp.find("http://llama:8080/v1/models")
+        mockHttp.answer(i, { "ok": true, "data": { "data": [{ "id": "bonsai-27b-ternary" }] } })
+        mgr.selectModel("openai:bonsai-27b-ternary")
+        compare(mgr.activeModel, "bonsai-27b-ternary")
+        compare(mgr.apiBase(), "http://llama:8080")
+        mgr.chat({ "model": "bonsai-27b-ternary", "messages": [] })
+        // Der OpenAiClient streamt über NdjsonStream, nicht über http —
+        // entscheidend ist, dass apiBase auf das richtige Backend zeigt.
+        compare(mgr.activeBackendId, "openai")
+    }
+
+    // Das Cloud-Flag ist die Leitplanke: der Auto-Modus darf nie dorthin
+    // greifen, auch wenn das Profil-Modell zufällig gleich heißt.
+    function test_autoModusUeberspringtCloud() {
+        ConfigStore.setValue("openrouterEnabled", true)
+        mgr.refresh()
+        compare(mgr.isCloudActive, false)
+        verify(mgr.activeBackendId !== "openrouter")
+    }
+
+    // Wer ein Cloud-Modell wählt, bekommt es — aber sichtbar markiert.
+    function test_cloudAuswahlWirdAlsSolcheGemeldet() {
+        ConfigStore.setValue("openrouterEnabled", true)
+        mgr.refresh()
+        var i = mockHttp.find("openrouter.ai/api/v1/models")
+        verify(i !== -1)
+        mockHttp.answer(i, { "ok": true, "data": { "data": [{ "id": "google/gemini-3.8-flash" }] } })
+        mgr.selectModel("openrouter:google/gemini-3.8-flash")
+        compare(mgr.activeBackendId, "openrouter")
+        compare(mgr.isCloudActive, true)
+    }
+
+    // Bestandsauswahl "remote:<modell>" muss weiter funktionieren: sie zeigt
+    // auf das erste Netzwerk-Backend. refreshModels braucht neben der Probe
+    // den zweiten /api/tags- und den /api/ps-Aufruf, bevor models steht —
+    // erst dann kann _applyPendingRemoteModel greifen (Alt-Test beantwortete
+    // nur die Probe und ließ die Auswahl dadurch leer).
+    function test_migrationAlterRemoteAuswahl() {
+        ConfigStore.setValue("remoteEnabled", true)
+        ConfigStore.setValue("remoteEndpoint", "http://lan:11434")
+        ConfigStore.setValue("lastSelectedModel", "remote:qwen3.6-27b")
+        mgr.refresh()
+        var iProbe = mockHttp.find("http://lan:11434/api/tags")
+        verify(iProbe !== -1)
+        mockHttp.answer(iProbe, _tags(["qwen3.6-27b"]))
+        var iRefresh = mockHttp.find("http://lan:11434/api/tags", iProbe + 1)
+        verify(iRefresh !== -1)
+        mockHttp.answer(iRefresh, _tags(["qwen3.6-27b"]))
+        mockHttp.answer(mockHttp.find("http://lan:11434/api/ps"), { "ok": true, "data": { "models": [] } })
+        compare(mgr.activeModel, "qwen3.6-27b")
+        compare(mgr.isRemote, true)
+    }
 }

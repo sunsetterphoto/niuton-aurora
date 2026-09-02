@@ -11,7 +11,11 @@ QtObject {
     property var settings: null            // AuroraSettings (Pflicht)
     property var fileio: Core.FileIO
     property var http: Core.Http
-    onHttpChanged: { localClient.http = http; remoteClient.http = http }
+    onHttpChanged: {
+        localClient.http = http
+        remoteClient.http = http
+        for (var id in _extraClients) _extraClients[id].http = http
+    }
 
     property string localEndpoint: "http://127.0.0.1:11434"
     property bool active: false            // Widget offen → Profil-Polling
@@ -28,10 +32,29 @@ QtObject {
         twoPhaseToolCalls: mgr.settings ? mgr.settings.twoPhaseToolCalls : false
     }
 
+    // Weitere Backends aus der Registry (alles außer dem lokalen Ollama und
+    // den LAN-Ollamas, die über die Probe an remoteClient gehen). Pro Backend
+    // eine Instanz der zu seiner Sorte passenden Client-Klasse.
+    property Component _openaiFactory: Component { OpenAiClient {} }
+    property var _extraClients: ({})       // backendId -> Client
+
+    readonly property var backends: settings ? settings.backends : []
+    onBackendsChanged: _syncExtraClients()
+
     // Zustand (UI liest)
-    property string selectedModel: "auto"  // "auto" | "local:<n>" | "remote:<n>"
+    property string selectedModel: "auto"  // "auto" | "<backendId>:<n>" | "remote:<n>"
     property string activeModel: ""
-    property bool isRemote: false
+    // Welches Backend bedient activeModel. "local" = der lokale Ollama.
+    property string activeBackendId: "local"
+    // isRemote heißt weiterhin "nicht der lokale Ollama" — davon hängen
+    // keep_alive und scheduleUnload ab: jedes andere Backend verwaltet seinen
+    // Speicher selbst.
+    readonly property bool isRemote: activeBackendId !== "local"
+    // Verlässt der aktive Zug das Haus? Steuert Kennzeichnung in der UI.
+    readonly property bool isCloudActive: {
+        var b = _backendById(activeBackendId)
+        return b ? b.cloud === true : false
+    }
     property bool modelLoaded: false
     property bool modelLoading: false
     property string powerProfile: ""
@@ -95,10 +118,71 @@ QtObject {
         for (var j = 0; j < rm.length; j++)
             e.push({ "label": (rm[j].loaded ? "● " : "") + rm[j].name + " (" + rm[j].sizeGB + " GB)",
                      "value": "remote:" + rm[j].name, "kind": "remote", "enabled": true })
+        // Weitere Backends in Registry-Reihenfolge. Ohne Größenangabe: die
+        // OpenAI-API kennt weder Dateigröße noch Ladezustand. Cloud-Backends
+        // tragen die Wolke im Gruppentitel — wer Daten aus dem Haus gibt, soll
+        // das im Picker sehen.
+        for (var bi = 0; bi < backends.length; bi++) {
+            var b = backends[bi]
+            if (!_isExtra(b)) continue
+            var c = _extraClients[b.id]
+            if (!c || c.models.length === 0) continue
+            e.push({ "label": b.cloud ? (b.label + " ☁") : b.label,
+                     "value": "", "kind": "header", "enabled": false })
+            for (var mi = 0; mi < c.models.length; mi++)
+                e.push({ "label": c.models[mi].name,
+                         "value": b.id + ":" + c.models[mi].name,
+                         "kind": b.cloud ? "cloud" : "extra", "enabled": true })
+        }
         return e
     }
 
+    function _backendById(id) {
+        for (var i = 0; i < backends.length; i++)
+            if (backends[i].id === id) return backends[i]
+        return null
+    }
+
+    // Ein Backend geht über remoteClient, wenn es ein Ollama im Netz ist —
+    // dafür gibt es die bestehende Epochen-Probe. Alles andere bekommt eine
+    // eigene, dauerhafte Client-Instanz.
+    function _isExtra(b) { return b.id !== "local" && b.kind !== "ollama" }
+
+    function _syncExtraClients() {
+        var cur = _extraClients
+        var soll = {}
+        for (var i = 0; i < backends.length; i++)
+            if (_isExtra(backends[i])) soll[backends[i].id] = backends[i]
+        // Entfallene Backends abräumen, sonst proben tote Clients weiter.
+        for (var id in cur) {
+            if (!soll[id]) {
+                if (cur[id]) cur[id].destroy()
+                delete cur[id]
+            }
+        }
+        for (var sid in soll) {
+            var b = soll[sid]
+            if (cur[sid]) {
+                cur[sid].baseUrl = b.endpoint
+                cur[sid].http = mgr.http
+            } else {
+                cur[sid] = _openaiFactory.createObject(mgr, {
+                    "baseUrl": b.endpoint, "http": mgr.http })
+            }
+        }
+        _extraClients = cur
+    }
+
+    // Der Client, der ein bestimmtes Backend bedient (null, wenn unbekannt).
+    function clientFor(id) {
+        if (id === "local") return localClient
+        if (_extraClients[id]) return _extraClients[id]
+        // LAN-Ollamas laufen über den Probe-Gewinner.
+        return (remoteClient.baseUrl !== "") ? remoteClient : null
+    }
+
     function refresh() {
+        _syncExtraClients()
         applySavedModel()
         checkPowerProfile()
         probeBackends()
@@ -112,7 +196,12 @@ QtObject {
     // Stelle. Verhalten außerhalb des Fensters (gültige remoteClient.baseUrl)
     // unverändert.
     function activeClient() {
-        return (isRemote && remoteClient.baseUrl !== "") ? remoteClient : localClient
+        if (activeBackendId === "local") return localClient
+        var c = clientFor(activeBackendId)
+        // Guard (Audit Task 3): im Fenster zwischen Probe-Start und -Antwort
+        // hat remoteClient eine leere baseUrl — dann auf den immer gültigen
+        // lokalen Client ausweichen, statt "" + "/api/..." zu bauen.
+        return c ? c : localClient
     }
     function apiBase() { return activeClient().baseUrl }
     function chat(request) { return activeClient().chat(request) }
@@ -160,7 +249,7 @@ QtObject {
         if (newModel === "") return
         var prevModel = activeModel
         var prevWasLocal = !isRemote
-        isRemote = false
+        activeBackendId = "local"   // Auto-Modus wählt nie ein Cloud-Backend
         if (newModel !== activeModel || !modelLoaded) {
             // Vorheriges Modell nur entladen, wenn es LOKAL war — der alte
             // Code schickte den keep_alive-0 für Remote-Modelle fälschlich
@@ -179,6 +268,11 @@ QtObject {
         _probeEpoch++
         var epoch = _probeEpoch
         localClient.refreshModels()
+        // Weitere Backends haben je einen dauerhaften Client und stehen nicht
+        // in Konkurrenz zueinander — sie brauchen die Epochen-/Gewinner-Logik
+        // der Netzwerk-Probe unten nicht.
+        _syncExtraClients()
+        for (var id in _extraClients) _extraClients[id].refreshModels()
 
         var raw = (settings && settings.remoteEndpoints) ? settings.remoteEndpoints : []
         var eps = []
@@ -272,13 +366,30 @@ QtObject {
     function applySavedModel() {
         var saved = (settings && settings.lastSelectedModel)
             ? settings.lastSelectedModel : "auto"
-        if (saved.indexOf("remote:") === 0) return   // nach erfolgreicher Probe
-        if (saved.indexOf("local:") === 0) {
+        // "remote:" (Bestandsformat) wartet auf die Probe — erst danach steht
+        // fest, welches Netzwerk-Backend gewonnen hat.
+        if (saved.indexOf("remote:") === 0) return
+        var id = _backendIdOf(saved)
+        if (id !== "" && id !== "auto") {
             selectModel(saved)
         } else {
             selectedModel = "auto"
-            isRemote = false
+            activeBackendId = "local"
         }
+    }
+
+    // "openai:bonsai-27b" -> "openai"; "auto"/unbekannt -> "". Der Modellname
+    // darf selbst Doppelpunkte tragen ("qwen3.5:9b"), deshalb nur am ERSTEN
+    // trennen und nur bekannte Backend-Ids akzeptieren.
+    function _backendIdOf(value) {
+        var k = value.indexOf(":")
+        if (k <= 0) return ""
+        var id = value.substring(0, k)
+        return _backendById(id) ? id : ""
+    }
+    function _modelNameOf(value) {
+        var k = value.indexOf(":")
+        return k <= 0 ? "" : value.substring(k + 1)
     }
 
     function selectModel(value) {
@@ -290,22 +401,31 @@ QtObject {
             // würde den Guard zerstören und ein Remote-Vorgängermodell doch
             // wieder am LOKALEN Server "entladen" (genau der Alt-Bug).
             resolveAndLoadModel()
-        } else if (value.indexOf("local:") === 0) {
-            isRemote = false
-            var name = value.substring(6)
-            if (name !== activeModel || !modelLoaded) {
-                activeModel = name
-                _preloadActive()
-            }
         } else if (value.indexOf("remote:") === 0) {
-            isRemote = true
+            // Bestandsformat: zeigt auf den Gewinner der Netzwerk-Probe.
+            activeBackendId = _remoteWinnerId()
             var rname = value.substring(7)
             if (rname !== activeModel || !modelLoaded) {
                 activeModel = rname
                 _preloadActive()   // ehrlich vorladen — am REMOTE-Backend
             }
+        } else {
+            var id = _backendIdOf(value)
+            if (id === "") return
+            activeBackendId = id
+            var name = _modelNameOf(value)
+            if (name !== activeModel || !modelLoaded) {
+                activeModel = name
+                _preloadActive()
+            }
         }
         _refreshActiveCaps()
+    }
+
+    // Die Netzwerk-Endpunkte werden aus denselben Schlüsseln gefaltet wie die
+    // lan-Backends der Registry, also entspricht Probe-Index 0 der Id "lan1".
+    function _remoteWinnerId() {
+        return _remoteWinnerIndex <= 0 ? "lan1" : "lan2"
     }
 
     function _preloadActive() {

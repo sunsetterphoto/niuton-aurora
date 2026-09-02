@@ -162,7 +162,9 @@ TestCase {
         verify(b !== null)
         compare(b.kind, "openai")
         compare(b.cloud, true)
-        compare(b.endpoint, "https://openrouter.ai/api/v1")
+        // Endpunkt OHNE /v1: der OpenAiClient hängt es selbst an
+        // (/v1/models), wie bei jedem anderen OpenAI-Server auch.
+        compare(b.endpoint, "https://openrouter.ai/api")
         compare(b.keyRef, "openrouter")
     }
 

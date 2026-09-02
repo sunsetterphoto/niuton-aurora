@@ -101,10 +101,12 @@ QtObject {
         var oa = ConfigStore.value("openaiEndpoint")
         if (oa) out.push({ "id": "openai", "kind": "openai", "endpoint": oa,
                            "label": "llama-server", "cloud": false })
-        // Cloud zuletzt und nur auf ausdrücklichen Wunsch.
+        // Cloud zuletzt und nur auf ausdrücklichen Wunsch. Endpunkt OHNE /v1:
+        // der OpenAiClient hängt die Route selbst an (/v1/models) — die alte
+        // Schreibweise mit /v1 ergab ".../api/v1/v1/models".
         if (ConfigStore.value("openrouterEnabled"))
             out.push({ "id": "openrouter", "kind": "openai",
-                       "endpoint": "https://openrouter.ai/api/v1",
+                       "endpoint": "https://openrouter.ai/api",
                        "label": "OpenRouter", "cloud": true,
                        "keyRef": "openrouter" })
         return out

@@ -26,14 +26,21 @@ void Http::setDefaultTimeoutMs(int ms)
     Q_EMIT defaultTimeoutMsChanged();
 }
 
-QNetworkReply *Http::start(const QString &url, const QByteArray &method, const QByteArray &payload, int timeoutMs)
+QNetworkReply *Http::start(const QString &url, const QByteArray &method,
+                           const QByteArray &payload, int timeoutMs,
+                           const QVariantMap &headers)
 {
     QNetworkRequest req{QUrl(url)};
     req.setTransferTimeout(timeoutMs > 0 ? timeoutMs : m_defaultTimeoutMs);
+    // POST und DELETE tragen einen JSON-Body (DELETE: Ollama /api/delete)
+    if (method != "GET")
+        req.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
+    // Nach dem Content-Type gesetzt: ein gleichnamiger Eintrag gewinnt. Muss
+    // vor JEDEM Versand stehen — auch vor dem GET-Zweig.
+    for (auto it = headers.cbegin(); it != headers.cend(); ++it)
+        req.setRawHeader(it.key().toUtf8(), it.value().toString().toUtf8());
     if (method == "GET")
         return m_nam.get(req);
-    // POST und DELETE tragen einen JSON-Body (DELETE: Ollama /api/delete)
-    req.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
     if (method == "POST")
         return m_nam.post(req, payload);
     return m_nam.sendCustomRequest(req, method, payload);
@@ -127,9 +134,10 @@ void Http::finishJson(QNetworkReply *reply, const QJSValue &callback)
     });
 }
 
-void Http::getJson(const QString &url, const QJSValue &callback, int timeoutMs)
+void Http::getJson(const QString &url, const QJSValue &callback, int timeoutMs,
+                   const QVariantMap &headers)
 {
-    finishJson(start(url, "GET", {}, timeoutMs), callback);
+    finishJson(start(url, "GET", {}, timeoutMs, headers), callback);
 }
 
 QVariant Http::normalizeBody(const QVariant &body)
@@ -139,10 +147,11 @@ QVariant Http::normalizeBody(const QVariant &body)
     return body;
 }
 
-void Http::postJson(const QString &url, const QVariant &body, const QJSValue &callback, int timeoutMs)
+void Http::postJson(const QString &url, const QVariant &body, const QJSValue &callback,
+                    int timeoutMs, const QVariantMap &headers)
 {
     const QByteArray payload = QJsonDocument::fromVariant(normalizeBody(body)).toJson(QJsonDocument::Compact);
-    finishJson(start(url, "POST", payload, timeoutMs), callback);
+    finishJson(start(url, "POST", payload, timeoutMs, headers), callback);
 }
 
 void Http::deleteJson(const QString &url, const QVariant &body, const QJSValue &callback, int timeoutMs)

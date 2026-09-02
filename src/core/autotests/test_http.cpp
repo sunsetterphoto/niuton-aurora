@@ -319,6 +319,56 @@ private Q_SLOTS:
         QTest::qWait(300);   // Reply abarbeiten lassen — kein Crash = bestanden
         QVERIFY(true);
     }
+
+    // Cloud-Backends brauchen einen Auth-Header (OpenRouter:
+    // "Authorization: Bearer <key>"). Ohne den kommt man dort nicht einmal an
+    // die Modell-Liste.
+    void getJson_sendetZusaetzlicheHeader()
+    {
+        TestHttpServer server;
+        server.setResponse(200, "{\"data\":[]}");
+        HttpFixture f;
+        QVariantMap headers;
+        headers[QStringLiteral("Authorization")] = QStringLiteral("Bearer geheim-123");
+        headers[QStringLiteral("HTTP-Referer")] = QStringLiteral("https://niuton.net");
+        f.http->getJson(server.baseUrl() + QStringLiteral("/v1/models"),
+                        f.callback(), 0, headers);
+        const QVariantMap r = f.wait();
+        QCOMPARE(r.value(QStringLiteral("ok")).toBool(), true);
+        // Qt schreibt Header-Namen kanonisch ("HTTP-Referer" -> "Http-Referer").
+        // Feldnamen sind laut RFC 9110 case-insensitiv, der Empfänger liest sie
+        // also korrekt — der Test vergleicht deshalb ebenfalls case-insensitiv.
+        const QByteArray head = server.lastRequestHead.toLower();
+        QVERIFY(head.contains("authorization: bearer geheim-123"));
+        QVERIFY(head.contains("http-referer: https://niuton.net"));
+    }
+
+    void postJson_sendetZusaetzlicheHeader()
+    {
+        TestHttpServer server;
+        server.setResponse(200, "{\"ok\":1}");
+        HttpFixture f;
+        QVariantMap headers;
+        headers[QStringLiteral("Authorization")] = QStringLiteral("Bearer geheim-456");
+        f.http->postJson(server.baseUrl() + QStringLiteral("/v1/embeddings"),
+                         QVariantMap{{QStringLiteral("input"), QStringLiteral("hi")}},
+                         f.callback(), 0, headers);
+        f.wait();
+        QVERIFY(server.lastRequestHead.contains("Authorization: Bearer geheim-456"));
+        // Content-Type darf dabei nicht verloren gehen
+        QVERIFY(server.lastRequestHead.contains("Content-Type: application/json"));
+    }
+
+    // Ohne Header-Argument bleibt alles wie bisher.
+    void ohneHeader_unveraendert()
+    {
+        TestHttpServer server;
+        server.setResponse(200, "{\"ok\":1}");
+        HttpFixture f;
+        f.http->getJson(server.baseUrl() + QStringLiteral("/x"), f.callback());
+        QCOMPARE(f.wait().value(QStringLiteral("ok")).toBool(), true);
+        QVERIFY(!server.lastRequestHead.contains("Authorization"));
+    }
 };
 
 QTEST_GUILESS_MAIN(TestHttp)

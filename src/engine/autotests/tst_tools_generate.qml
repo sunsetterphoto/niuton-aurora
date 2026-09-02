@@ -20,10 +20,23 @@ Item {
         return { comfy: comfy, settings: { comfyDefaultModel: "z_image_turbo" } }
     }
 
+    // Cloud-Weg: ctx.genImageFn ist gesetzt (aktives Bildmodell) → das Tool
+    // nutzt die Cloud statt ComfyUI. Funktion ruft cb({ok, images, error}).
+    function makeCloudCtx(comfy, cloudFn) {
+        var ctx = makeCtx(comfy)
+        ctx.genImageFn = cloudFn
+        return ctx
+    }
+
     GenerateImageTool { id: genTool }
+
+    property var cloudOut: null
+    property var cloudEx: null
 
     TestCase {
         name: "GenerateImageTool"
+
+        function init() { cloudOut = null; cloudEx = null }
 
         function test_metadata() {
             compare(genTool.name, "generate_image")
@@ -35,6 +48,40 @@ Item {
             compare(genTool.isAvailable(makeCtx(c)), false)
             c.available = true
             compare(genTool.isAvailable(makeCtx(c)), true)
+            c.destroy()
+        }
+
+        function test_cloudWegNutztGenImageFnStattComfy() {
+            var c = comfyComp.createObject(null)
+            var cloudArgs = null
+            var cloudDone = null
+            var ctx = makeCloudCtx(c, function(args, done) { cloudArgs = args; cloudDone = done })
+            var out = null
+            genTool.execute({ prompt: "a cat" }, ctx, function(t) { out = t })
+            compare(cloudArgs.prompt, "a cat")
+            compare(c.lastOpts, null)                  // ComfyUI NICHT angerufen
+            cloudDone({ "ok": true, "images": ["data:image/png;base64,AAA"] })
+            verify(out.indexOf("erfolgreich") >= 0)
+            c.destroy()
+        }
+
+        function test_cloudWegFehlerMeldetError() {
+            var c = comfyComp.createObject(null)
+            var cloudDone = null
+            genTool.execute({ prompt: "x" }, makeCloudCtx(c, function(args, done) { cloudDone = done }),
+                function(t, extra) { cloudOut = t; cloudEx = extra })
+            cloudDone({ "ok": false, "images": [], "error": "Cloud 401" })
+            verify(cloudOut.indexOf("fehlgeschlagen") >= 0)
+            verify(cloudOut.indexOf("Cloud 401") >= 0)
+            compare(cloudEx.status, "error")
+            c.destroy()
+        }
+
+        function test_cloudWegErstWennGenImageFnGesetzt() {
+            var c = comfyComp.createObject(null)
+            var out = null
+            genTool.execute({ prompt: "x" }, makeCtx(c), function(t) { out = t })
+            compare(c.lastOpts.prompt, "x")            // weiterhin ComfyUI-Pfad
             c.destroy()
         }
 

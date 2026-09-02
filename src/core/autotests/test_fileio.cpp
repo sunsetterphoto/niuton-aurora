@@ -62,6 +62,35 @@ private Q_SLOTS:
         QCOMPARE(r.value("mime").toString(), QStringLiteral("text/plain"));
     }
 
+    // writeBase64: dekodiert und schreibt atomar (QSaveFile), wie writeText.
+    // Rückweg über readBase64 belegt den Round-Trip.
+    void writeBase64_roundtrip_mit_mkpath()
+    {
+        QTemporaryDir tmp;
+        FileIO io;
+        const QString path = tmp.path() + QStringLiteral("/a/b/img.png");
+        const QByteArray roh = QByteArrayLiteral("\x89PNG\r\n\x1a\n\x01\x02\x03");
+        const QVariantMap w = io.writeBase64(path, QString::fromLatin1(roh.toBase64()));
+        QCOMPARE(w.value("ok").toBool(), true);
+        QCOMPARE(w.value("error").toString(), QString());
+        const QVariantMap r = io.readBase64(path, 1024);
+        QCOMPARE(r.value("ok").toBool(), true);
+        QCOMPARE(QByteArray::fromBase64(r.value("data").toString().toLatin1()), roh);
+        QCOMPARE(r.value("mime").toString(), QStringLiteral("image/png"));
+    }
+
+    // Nur ungültige Zeichen (Qt dekodiert lenient): nach dem Strip nichts übrig
+    // → kein Nullen-Datei-Schreiben, ok:false.
+    void writeBase64_ungueltigerInput()
+    {
+        QTemporaryDir tmp;
+        FileIO io;
+        const QString path = tmp.path() + QStringLiteral("/kaputt.bin");
+        const QVariantMap w = io.writeBase64(path, QStringLiteral("!!!      "));
+        QCOMPARE(w.value("ok").toBool(), false);
+        QCOMPARE(QFile::exists(path), false);
+    }
+
     // Haertungswelle Fund 5: das Limit muss NACH dem open via read(limit+1)
     // greifen (wie readText) — st_size luegt bei Pseudo-Dateien (size()==0
     // bei /proc). Vor dem Fix unterlief eine solche Datei das Limit.

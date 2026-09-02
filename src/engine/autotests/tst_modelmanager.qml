@@ -648,6 +648,33 @@ TestCase {
         mgr.cloudSearch = ""
     }
 
+    // Bildgenerierung (explizit, nur wenn das aktive Modell Bild-Ausgabe kann):
+    // der ModelManager leitet an den aktiven Client weiter — OpenAiClient
+    // mit imageOutput, sonst kein Weg (ComfyUI ist der andere, parallele Pfad).
+    function test_generateImageNurBeiBildfaehigemModell() {
+        mgr.keyring = mockKeyring
+        ConfigStore.setValue("openrouterEnabled", true)
+        mgr.refresh()
+        var i = mockHttp.find("openrouter.ai/api/v1/models")
+        verify(i !== -1)
+        mockHttp.answer(i, { "ok": true, "data": { "data": [
+            { "id": "google/gemini-3.1-flash-image",
+              "architecture": { "output_modalities": ["text", "image"] } }] } })
+        // Aktives Modell ist Auto (lokal) → kein Cloud-Pfad (Leitprinzip:
+        // Auto greift nie zur Cloud) → Fehler statt Request ans Cloud-Backend.
+        var out = "unset"
+        mgr.generateImage({ "prompt": "Katze" }, function(r) { out = r })
+        compare(out.ok, false)
+
+        mgr.selectModel("openrouter:google/gemini-3.1-flash-image")
+        out = "unset"
+        mockHttp.calls = []
+        mgr.generateImage({ "prompt": "Katze" }, function(r) { out = r })
+        var j = mockHttp.find("openrouter.ai/api/v1/chat/completions")
+        verify(j !== -1)
+        compare(mockHttp.calls[j].body.modalities.length, 2)
+    }
+
     // Bestandsauswahl "remote:<modell>" muss weiter funktionieren: sie zeigt
     // auf das erste Netzwerk-Backend. refreshModels braucht neben der Probe
     // den zweiten /api/tags- und den /api/ps-Aufruf, bevor models steht —

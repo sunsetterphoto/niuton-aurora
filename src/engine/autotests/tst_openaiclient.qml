@@ -478,6 +478,53 @@ TestCase {
         job.destroy()
     }
 
+    // ---------- Bildausgabe (Phase 5, non-streaming) ----------
+
+    // OpenRouter-Bildgenerierung ist im Doku-Beispiel non-streaming:
+    // modalities ["image","text"], Antwort liefert message.images[].image_url.url
+    // als data-URL. Der Client liefert die Liste der data-URLs zurück.
+    function test_generateImageNonStreamingLiefertDataUrls() {
+        client.keyRef = "openrouter"
+        var out = null
+        client.generateImage({ "model": "google/gemini-3.1-flash-image", "prompt": "eine Katze" }, function(r) { out = r })
+        var c = mockHttp.last()
+        compare(c.method, "post")
+        verify(c.url.indexOf("/v1/chat/completions") !== -1)
+        compare(c.body.model, "google/gemini-3.1-flash-image")
+        compare(c.body.stream, false)
+        compare(c.body.modalities[0], "image")
+        compare(c.body.modalities[1], "text")
+        compare(c.body.messages[0].content, "eine Katze")
+        compare(c.headers["Authorization"], "Bearer sk-test")
+        mockHttp.answer(mockHttp.calls.length - 1, { "ok": true, "data": {
+            "choices": [{ "message": { "images": [
+                { "image_url": { "url": "data:image/png;base64,AAA" } }] } }] } })
+        verify(out.ok)
+        compare(out.images.length, 1)
+        compare(out.images[0], "data:image/png;base64,AAA")
+        client.keyRef = ""
+    }
+
+    // Ohne Auth-Key (lokal) kein Header — aber der Call darf trotzdem gehen.
+    function test_generateImageOhneKeyKeinHeader() {
+        var out = null
+        client.generateImage({ "prompt": "x" }, function(r) { out = r })
+        var c = mockHttp.last()
+        verify(!(c.headers && c.headers["Authorization"]))
+        mockHttp.answer(mockHttp.calls.length - 1, { "ok": true, "data": {
+            "choices": [{ "message": { "images": [] } }] } })
+        verify(out.ok)
+        compare(out.images.length, 0)
+    }
+
+    function test_generateImageFehlerLiefertOkFalse() {
+        var out = "unset"
+        client.generateImage({ "prompt": "x" }, function(r) { out = r })
+        mockHttp.answer(mockHttp.calls.length - 1, { "ok": false, "status": 401, "error": "unauthorized" })
+        compare(out.ok, false)
+        verify(out.error !== undefined)
+    }
+
     // ---------- Embeddings ----------
 
     function test_embedLiestErstenVektor() {

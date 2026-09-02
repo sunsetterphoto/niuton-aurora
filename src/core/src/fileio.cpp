@@ -97,6 +97,29 @@ QVariantMap FileIO::readBase64(const QString &path, int maxBytes) const
             {QStringLiteral("error"), QString()}};
 }
 
+QVariantMap FileIO::writeBase64(const QString &path, const QString &base64) const
+{
+    // Dekodieren VOR dem Schreiben: ungültiger Input darf keine (leere) Datei
+    // hinterlassen — der Aufrufer speichert sonst unbrauchbare Bilder.
+    const QByteArray roh = QByteArray::fromBase64(base64.toLatin1());
+    if (roh.isEmpty() && base64.trimmed().size() > 0) {
+        return fehler(QStringLiteral("Ungültiger Base64-Input"));
+    }
+    const QFileInfo info(path);
+    if (!QDir().mkpath(info.absolutePath())) {
+        return fehler(QStringLiteral("Konnte Verzeichnis nicht anlegen: %1").arg(info.absolutePath()));
+    }
+    QSaveFile f(path);
+    if (!f.open(QIODevice::WriteOnly)) {
+        return fehler(f.errorString());
+    }
+    f.write(roh);
+    if (!f.commit()) {
+        return fehler(f.errorString());
+    }
+    return {{QStringLiteral("ok"), true}, {QStringLiteral("error"), QString()}};
+}
+
 bool FileIO::exists(const QString &path) const
 {
     return QFileInfo::exists(path);

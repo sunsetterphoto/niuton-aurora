@@ -14,6 +14,9 @@ QtObject {
     property var comfy: null
     property var chatFn: null
     property var embedFn: null
+    // Explizite Cloud-Bildgenerierung (vom AuroraController gesetzt); reicht
+    // an den ChatController für ctx.genImageFn (Quellenwahl im Tool).
+    property var imageGenFn: null
     property string homeDir: ""
     property bool thinkingEnabled: false
 
@@ -34,6 +37,7 @@ QtObject {
         store: engine.store; settings: engine.settings; registry: engine.registry
         resolver: engine.resolver; grants: engine.grants; comfy: engine.comfy
         chatFn: engine.chatFn; embedFn: engine.embedFn; homeDir: engine.homeDir; thinkingEnabled: engine.thinkingEnabled
+        imageGenFn: engine.imageGenFn
         activeModel: engine.modelManager ? engine.modelManager.activeModel : ""
         activeCaps: engine.modelManager ? engine.modelManager.activeCaps : []
         isRemote: engine.modelManager ? engine.modelManager.isRemote : false

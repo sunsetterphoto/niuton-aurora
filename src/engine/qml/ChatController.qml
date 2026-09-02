@@ -19,6 +19,10 @@ QtObject {
     property var http: (typeof Http !== "undefined") ? Http : null
     property var chatFn: null                 // function(request) -> ChatJob
     property var embedFn: null                // function(input, cb) -> cb({vec, model} | null)
+    // Explizite Cloud-Bildgenerierung (OpenRouter-Bildmodell). Funktion
+    // (request, cb) mit request.prompt; cb({ok, images:[dataUrl], error}).
+    // Nur gesetzt, wenn ein Bildmodell aktiv ist — die Cloud ist nie automatisch.
+    property var imageGenFn: null
 
     // --- Kontext (Betrieb: an ModelManager gebunden; Test: gesetzt) ---
     property string activeModel: ""
@@ -135,6 +139,9 @@ QtObject {
     function _buildCtx() {
         return {
             "fileio": ctl.fileio, "http": ctl.http, "settings": ctl.settings, "comfy": ctl.comfy,
+            // Explizite Bildausgabe über ein Bildmodell (Quellenwahl im
+            // generate_image-Tool): nur im Kontext, wenn der Controller sie hat.
+            "genImageFn": ctl.imageGenFn,
             // Ursprungs-Konversation für Tools, die eine spätere Zuordnung brauchen
             // (generate_image reicht sie als originConvId an ComfyClient weiter, damit
             // der onFinished-Guard tool-Bilder ebenfalls der richtigen Konversation

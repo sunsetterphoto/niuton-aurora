@@ -18,6 +18,10 @@ public:
     Q_INVOKABLE QVariantMap readText(const QString &path, int maxBytes = 1048576) const;
     Q_INVOKABLE QVariantMap writeText(const QString &path, const QString &text) const;
     Q_INVOKABLE QVariantMap readBase64(const QString &path, int maxBytes = 20971520) const;
+    // Schreibt dekodierten Base64-Input atomar (QSaveFile) wie writeText.
+    // Daten-URLs aus der OpenRouter-Bildausgabe landen hier als Datei.
+    // Ungültiger Input: ok:false, ohne Datei anzulegen (kein Teil-Schreiben).
+    Q_INVOKABLE QVariantMap writeBase64(const QString &path, const QString &base64) const;
     Q_INVOKABLE bool exists(const QString &path) const;
     Q_INVOKABLE QVariantMap fileInfo(const QString &path) const;
     Q_INVOKABLE QVariantMap listDir(const QString &path, bool showHidden = false) const;

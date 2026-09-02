@@ -263,6 +263,19 @@ QtObject {
     }
     function apiBase() { return activeClient().baseUrl }
     function chat(request) { return activeClient().chat(request) }
+    // Bildgenerierung über den AKTIVEN Client — nur wenn er das kann (OpenAI-
+    // Bildmodelle). Der Auto-Modus zeigt auf den lokalen Ollama, der diese
+    // Methode nicht hat → Fehler; damit greift der explizite Bildwunsch nie
+    // automatisch zur Cloud (Leitprinzip), sondern nur nach manueller Wahl
+    // eines Bildmodells.
+    function generateImage(request, callback) {
+        var c = activeClient()
+        if (typeof c.generateImage !== "function") {
+            if (callback) callback({ "ok": false, "images": [], "error": "Aktives Modell kann keine Bilder erzeugen" })
+            return
+        }
+        c.generateImage(request, callback)
+    }
     // Embedding mit Backend-Fallback: aktives Backend zuerst; liefert es null
     // (Embedding-Modell fehlt dort oder Backend down), der zweite Client —
     // RAG soll funktionieren, solange IRGENDEIN Backend das Modell hat

@@ -214,4 +214,37 @@ QtObject {
                 }, 20000, client._authHeaders())
         })
     }
+
+    // Bildgenerierung über ein Bild-Ausgabe-Modell (OpenRouter). NON-Streaming:
+    // so dokumentiert (message.images[].image_url.url als data-URL) — die
+    // SSE-Struktur für Bilder ist offiziell nicht spezifiziert, also nicht
+    // erraten. request: {model, prompt}; callback({ok, images:[dataUrl,...],
+    // error?}).
+    function generateImage(request, callback) {
+        _resolveKey(function() {
+            if (baseUrl === "") { if (callback) callback({ "ok": false, "images": [], "error": "kein Backend" }); return }
+            http.postJson(baseUrl + "/v1/chat/completions",
+                { "model": request.model,
+                  "messages": [{ "role": "user", "content": request.prompt }],
+                  "stream": false,
+                  "modalities": ["image", "text"] },
+                function(res) {
+                    var urls = []
+                    var ok = res.ok && res.data
+                    if (ok) {
+                        var msg = (res.data.choices && res.data.choices[0]
+                                   && res.data.choices[0].message)
+                            ? res.data.choices[0].message : null
+                        var imgs = (msg && msg.images) || []
+                        for (var i = 0; i < imgs.length; i++) {
+                            var u = imgs[i].image_url && imgs[i].image_url.url
+                            if (u) urls.push(u)
+                        }
+                    }
+                    if (callback) callback({ "ok": ok,
+                                             "images": urls,
+                                             "error": ok ? "" : (res.error || "HTTP " + res.status) })
+                }, 120000, client._authHeaders())
+        })
+    }
 }

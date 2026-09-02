@@ -27,6 +27,27 @@ Tool {
     function describe(args) { return "Bild generieren: " + (args.prompt || "") }
     function isAvailable(ctx) { return !!(ctx.comfy && ctx.comfy.available) }
 
+    // Quellenwahl (Nutzerfestlegung „ein gemeinsamer Weg"): Ist eine
+    // Cloud-Bildfunktion im Kontext (aktives OpenRouter-Bildmodell, vom
+    // AuroraController bereitgestellt), geht der explizite Bildwunsch dorthin;
+    // sonst ComfyUI. Die Cloud ist NIE automatisch — sie existiert im Kontext
+    // nur, wenn der Nutzer ein Bildmodell ausgewählt hat.
+    function _nimmCloud(ctx, args, done) {
+        if (!ctx.genImageFn) return false
+        // originConvId wie beim ComfyUI-Weg: der Handler verwirft das Bild,
+        // falls die Konversation seit dem Start der Generierung wechselte.
+        ctx.genImageFn({ "prompt": args.prompt || "",
+                         "originConvId": ctx.conversationId || "" }, function(r) {
+            if (r && r.ok) {
+                done("Bild wurde erfolgreich generiert und dem Nutzer angezeigt.", { "status": "ok" })
+            } else {
+                var err = (r && r.error) ? r.error : "unbekannter Fehler"
+                done("Bildgenerierung fehlgeschlagen: " + err, { "status": "error" })
+            }
+        })
+        return true
+    }
+
     function _disconnect() {
         if (_comfy && _onFinished) _comfy.finished.disconnect(_onFinished)
         if (_comfy && _onFailed) _comfy.failed.disconnect(_onFailed)
@@ -34,6 +55,7 @@ Tool {
     }
 
     function execute(args, ctx, done) {
+        if (_nimmCloud(ctx, args, done)) return
         var comfy = ctx.comfy
         if (!comfy || !comfy.available) { done("Bildgenerierung ist derzeit nicht verfügbar (ComfyUI offline).", { status: "error" }); return }
         if (comfy.busy) { done("Bildgenerierung läuft bereits — bitte warten, bis sie abgeschlossen ist.", { status: "error" }); return }

@@ -113,6 +113,43 @@ QtObject {
         homeDir: FileIO.standardPath("home")
         thinkingEnabled: controller.thinkingEnabled
         chatFn: function(req) { return modelManager.chat(req) }
+        // Explizite Bildausgabe über ein OpenRouter-Bildmodell: der Weg ist
+        // dem ComfyUI-Pfad nachempfunden (Ausgabe in dieselbe Chat-Blase über
+        // appendGeneratedImage, conversationId-Guard gegen falsche Zuordnung).
+        // Die Cloud ist nie automatisch — modelManager.generateImage liefert
+        // nur etwas, wenn das AKTIVE Modell ein Bildmodell ist.
+        imageGenFn: function(req, cb) {
+            modelManager.generateImage(req, function(r) {
+                if (!r.ok || r.images.length === 0) { if (cb) cb(r); return }
+                // data-URLs -> Dateien (im selben Bildordner wie ComfyUI)
+                var dir = FileIO.standardPath("appData") + "/images"
+                var n = 0
+                var paths = []
+                for (var i = 0; i < r.images.length; i++) {
+                    var url = r.images[i]
+                    var komma = url.indexOf(",")
+                    if (komma < 0) continue
+                    var mime = url.substring(5, komma).split(";")[0] // "image/png"
+                    var ext = (mime === "image/jpeg") ? "jpg"
+                            : (mime === "image/webp") ? "webp" : "png"
+                    var dest = dir + "/aurora-" + Date.now() + "-" + (n++) + "." + ext
+                    var w = FileIO.writeBase64(dest, url.substring(komma + 1))
+                    if (w.ok) paths.push(dest)
+                }
+                var ok = paths.length > 0
+                if (ok) {
+                    var origin = req.originConvId || ""
+                    // conversationId-Guard identisch zum ComfyUI-Weg: nur
+                    // anhängen, wenn die Konversation unverändert ist — ein
+                    // gewechseltes Bild landet nicht in der falschen Bubble.
+                    if (engine.conversationId === origin)
+                        for (var p = 0; p < paths.length; p++)
+                            engine.appendGeneratedImage(paths[p], req.prompt, true)
+                }
+                if (cb) cb({ "ok": ok, "images": paths,
+                             "error": ok ? "" : "Cloud-Bilder konnten nicht gespeichert werden" })
+            })
+        }
         embedFn: function(input, cb) {
             var m = settings.embedModel
             modelManager.embed(m, input, function(vec) {

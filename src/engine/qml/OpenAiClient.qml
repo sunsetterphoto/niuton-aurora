@@ -187,7 +187,8 @@ QtObject {
             "httpRef": http,
             "streamFactory": sseFactory,
             "url": baseUrl + "/v1/chat/completions",
-            "payload": payload
+            "payload": payload,
+            "fetchCost": keyRef !== ""   // nur Cloud: Kosten-Stats nachladen
         })
         // Der Job wird sofort zurückgegeben (Signale können schon verbunden
         // werden); gestartet wird erst, wenn der Schlüssel da ist — kein

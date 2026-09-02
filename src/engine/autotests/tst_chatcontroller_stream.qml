@@ -88,6 +88,30 @@ Item {
             compare(ctl.chatModel.get(1).text, "Hallo!")
         }
 
+        // done mit usage/cost (Cloud-Backend) schreibt die Kosten in das
+        // extra der persistierten Antwort — die DB-Spur behält sie beim Reload.
+        function test_donePersistsKostenImExtra() {
+            ctl.send("Hi", null)
+            lastJob.done({ content: "A", thinking: "", toolCalls: [],
+                           usage: { "prompt_tokens": 10, "completion_tokens": 5,
+                                    "total_tokens": 15 },
+                           generationId: "gen-abc", cost: 0.0123 })
+            var last = storeMock.appended[storeMock.appended.length - 1]
+            compare(last.role, "assistant")
+            compare(last.extra.cost, 0.0123)
+            compare(last.extra.generationId, "gen-abc")
+            compare(last.extra.usage.total_tokens, 15)
+        }
+
+        // Ohne usage/cost (lokales Backend) bleibt das extra sauber (kein
+        // Kosten-Blob mit leeren Feldern).
+        function test_doneOhneKostenLaesstExtraSauber() {
+            ctl.send("Hi", null)
+            lastJob.done({ content: "B", thinking: "", toolCalls: [] })
+            var last = storeMock.appended[storeMock.appended.length - 1]
+            compare(last.extra, undefined)
+        }
+
         function test_doneFinalizesAndPersists() {
             ctl.send("Hi", null)
             lastJob.token("Antwort")

@@ -414,7 +414,71 @@ TestCase {
         job.destroy()
     }
 
-// ---------- Embeddings ----------
+// ---------- Kosten & Usage (Phase 5) ----------
+
+    // Der letzte Stream-Chunk trägt usage (leere choices) und die Antwort-Id.
+    // Beide müssen ins done-Result — ohne weiteren Request (fetchCost aus).
+    function test_usageUndIdAusLetztemChunk() {
+        var job = client.chat({ "model": "m", "messages": [] })
+        _connectLog(job)
+        var s = job._stream
+        s.objectReceived({ "id": "gen-abc123", "choices": [{ "delta": { "content": "Hi" } }] })
+        s.objectReceived({ "id": "gen-abc123", "choices": [],
+                           "usage": { "prompt_tokens": 10, "completion_tokens": 5,
+                                      "total_tokens": 15 } })
+        s.finished(true, 200, "")
+        var doneEntry = log[log.length - 1]
+        compare(doneEntry[0], "done")
+        compare(doneEntry[1].usage.total_tokens, 15)
+        compare(doneEntry[1].generationId, "gen-abc123")
+        verify(doneEntry[1].cost === undefined)   // kein fetchCost → kein Lookup
+        job.destroy()
+    }
+
+    // Cloud-Backend (keyRef gesetzt): Kosten werden über /v1/generation?id=
+    // nachgeladen (GET mit Auth-Header). Das done-Result trägt dann cost.
+    function test_kostenLookupFuerCloudBackend() {
+        client.keyRef = "openrouter"
+        var job = client.chat({ "model": "m", "messages": [] })
+        _connectLog(job)
+        var s = job._stream
+        s.objectReceived({ "id": "gen-xyz", "choices": [{ "delta": { "content": "ok" } }] })
+        s.objectReceived({ "id": "gen-xyz", "choices": [],
+                           "usage": { "total_tokens": 7 } })
+        s.finished(true, 200, "")
+        // Der Job fragt die Generation-Stats nach (GET, Auth nötig)
+        var c = mockHttp.last()
+        compare(c.method, "get")
+        verify(c.url.indexOf("/v1/generation?id=gen-xyz") !== -1)
+        compare(c.headers["Authorization"], "Bearer sk-test")
+        mockHttp.answer(mockHttp.calls.length - 1,
+            { "ok": true, "data": { "total_cost": 0.0123 } })
+        var doneEntry = log[log.length - 1]
+        compare(doneEntry[0], "done")
+        compare(doneEntry[1].cost, 0.0123)
+        client.keyRef = ""
+        job.destroy()
+    }
+
+    // Lookup-Fehler (z.B. Endpoint unbekannt) dürfen die Antwort nicht
+    // verwerfen — done feuert trotzdem, nur ohne cost.
+    function test_kostenLookupFehlerLaesstDoneBestanden() {
+        client.keyRef = "openrouter"
+        var job = client.chat({ "model": "m", "messages": [] })
+        _connectLog(job)
+        var s = job._stream
+        s.objectReceived({ "id": "gen-fehlt", "choices": [{ "delta": { "content": "x" } }] })
+        s.finished(true, 200, "")
+        mockHttp.answer(mockHttp.calls.length - 1, { "ok": false, "status": 404 })
+        var doneEntry = log[log.length - 1]
+        compare(doneEntry[0], "done")
+        compare(doneEntry[1].content, "x")
+        verify(doneEntry[1].cost === undefined)
+        client.keyRef = ""
+        job.destroy()
+    }
+
+    // ---------- Embeddings ----------
 
     function test_embedLiestErstenVektor() {
         var vec = null

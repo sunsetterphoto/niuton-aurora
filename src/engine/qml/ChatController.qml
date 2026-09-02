@@ -545,10 +545,19 @@ QtObject {
     // --- Tool-Schleife (Task 3) ---
     property var _catPolicy: CategoryPolicy {}
     property var _loopCache: ({})      // key -> result (pro Zug)
+    // Kosten/Usage der letzten Antwort (Cloud-Backend, aus job.done)
+    property var _lastUsage: null
+    property var _lastCost: null
+    property string _lastGenerationId: ""
     property var _queue: []            // offene Calls der aktuellen Runde
     property int _queuePos: 0
 
     function _onStreamDone(result) {
+        // Kosten/Usage der Antwort (Cloud-Backend): im extra der finalen
+        // Message ablegen, damit die DB-Spur sie beim Reload behält.
+        ctl._lastUsage = result.usage || null
+        ctl._lastCost = (result.cost !== undefined) ? result.cost : null
+        ctl._lastGenerationId = result.generationId || ""
         // Harte Obergrenze (Audit ChatController.qml:390): toolMaxRounds steuerte
         // bisher nur, ob Tools ANGEBOTEN werden (req.tools in _stream) — nicht, ob
         // die Schleife weiterläuft. Hält sich das Backend nicht daran und liefert
@@ -771,6 +780,14 @@ QtObject {
                     "model": ctl.activeModel, "backend": ctl.isRemote ? "remote" : "local",
                     "status": status }
         if (ragSlim.length > 0) msg.extra = { "ragSources": ragSlim }
+        // Antwort-Kosten (Cloud): extra zusammenführen statt ersetzen
+        if (ctl._lastCost !== null || ctl._lastUsage !== null || ctl._lastGenerationId !== "") {
+            var costExtra = msg.extra ? msg.extra : ({})
+            if (ctl._lastCost !== null) costExtra.cost = ctl._lastCost
+            if (ctl._lastUsage !== null) costExtra.usage = ctl._lastUsage
+            if (ctl._lastGenerationId !== "") costExtra.generationId = ctl._lastGenerationId
+            msg.extra = costExtra
+        }
         var aid = _persist(msg)
         if (_streamIndex >= 0 && _streamIndex < chatModel.count) {
             chatModel.setProperty(_streamIndex, "streaming", false)

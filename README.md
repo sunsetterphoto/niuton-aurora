@@ -17,8 +17,9 @@ your own cloud storage rank equally; a third-party cloud is the deliberate excep
 ## Features
 
 - **Several model backends, one interface**: local Ollama, Ollama on your LAN (probed in parallel,
-  with fallback), and OpenAI-compatible servers. Auto mode picks a local model per power profile
-  and never reaches for a cloud backend on its own.
+  with fallback), OpenAI-compatible servers (`llama-server`, vLLM), and — as an explicit,
+  never-automatic exception — OpenRouter in the cloud. Auto mode picks a local model per power
+  profile and never reaches for a cloud backend on its own.
 - **Streaming chat** with separate "thinking" output and **tool calling**: web search, read file,
   list directory, fetch URL, run command (with confirmation), and image generation. Per-tool
   permissions (auto / confirm).
@@ -48,6 +49,8 @@ _Coming soon._
 - KDE Plasma 6 on Linux (developed and tested on Fedora)
 - Qt 6 and KDE Frameworks 6
 - [Ollama](https://ollama.com) for local models
+- KWallet (`kf6-kwallet`) if you store cloud API keys (the OpenRouter key is never written to the
+  config file)
 - Optional: a remote Ollama server; ComfyUI for image generation; Piper (TTS) and whisper.cpp
   (STT) for voice; a local search backend (ddgs / SearXNG) for `web_search`
 

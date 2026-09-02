@@ -19,6 +19,9 @@ class NdjsonStream : public QObject
     Q_PROPERTY(bool active READ active NOTIFY activeChanged)
     Q_PROPERTY(int idleTimeoutMs READ idleTimeoutMs WRITE setIdleTimeoutMs NOTIFY idleTimeoutMsChanged)
     Q_PROPERTY(int maxLineBytes READ maxLineBytes WRITE setMaxLineBytes NOTIFY maxLineBytesChanged)
+    // SSE statt NDJSON: OpenAI-kompatible Server (llama-server, vLLM) rahmen
+    // jede Nutzzeile als "data: <json>"; alles andere ist Protokoll-Rahmen.
+    Q_PROPERTY(bool sse READ sse WRITE setSse NOTIFY sseChanged)
 
 public:
     explicit NdjsonStream(QObject *parent = nullptr);
@@ -28,6 +31,8 @@ public:
     void setIdleTimeoutMs(int ms);
     int maxLineBytes() const;
     void setMaxLineBytes(int bytes);
+    bool sse() const;
+    void setSse(bool on);
 
     // Startet den Stream; ein bereits laufender wird vorher STILL verworfen.
     Q_INVOKABLE void post(const QString &url, const QVariant &body,
@@ -42,6 +47,7 @@ Q_SIGNALS:
     void activeChanged();
     void idleTimeoutMsChanged();
     void maxLineBytesChanged();
+    void sseChanged();
 
 private:
     void onReadyRead();
@@ -64,4 +70,5 @@ private:
     // Harte Kappe für eine einzelne Zeile: ein newline-loser Stream ließe den
     // Puffer sonst bis zum Idle-Timeout unbegrenzt wachsen.
     int m_maxLineBytes = 1048576;   // 1 MiB
+    bool m_sse = false;
 };

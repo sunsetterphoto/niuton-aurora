@@ -49,6 +49,19 @@ void NdjsonStream::setMaxLineBytes(int bytes)
     Q_EMIT maxLineBytesChanged();
 }
 
+bool NdjsonStream::sse() const
+{
+    return m_sse;
+}
+
+void NdjsonStream::setSse(bool on)
+{
+    if (m_sse == on)
+        return;
+    m_sse = on;
+    Q_EMIT sseChanged();
+}
+
 QVariant NdjsonStream::normalizeBody(const QVariant &body)
 {
     if (body.metaType() == QMetaType::fromType<QJSValue>())
@@ -161,7 +174,16 @@ void NdjsonStream::emitLine(const QByteArray &line)
 {
     if (line.isEmpty())
         return;
-    const QJsonDocument doc = QJsonDocument::fromJson(line);
+    QByteArray payload = line;
+    if (m_sse) {
+        // Nur "data:"-Zeilen tragen Nutzlast. Kommentare (": ping" als
+        // Keepalive) sowie "event:"/"id:"/"retry:" sind Protokoll-Rahmen und
+        // werden verworfen; "data: [DONE]" ist kein Objekt und fällt unten raus.
+        if (!payload.startsWith("data:"))
+            return;
+        payload = payload.mid(5).trimmed();
+    }
+    const QJsonDocument doc = QJsonDocument::fromJson(payload);
     if (!doc.isObject())
         return; // defekte, aber vollständige Zeile: überspringen
     Q_EMIT objectReceived(doc.object().toVariantMap());

@@ -288,6 +288,62 @@ private Q_SLOTS:
         QVERIFY(server.lastRequestHead.toLower().contains("content-type: application/json"));
         QVERIFY(server.lastRequestBody.contains("\"model\":\"qwen3.5:0.8b\""));
     }
+
+    // SSE (OpenAI-kompatible Server wie llama-server): jede Nutzzeile traegt
+    // ein "data: "-Praefix, das Stream-Ende ist "data: [DONE]" (kein JSON).
+    void sseModus_stripptDataPraefix()
+    {
+        TestHttpServer server;
+        server.setResponse(200,
+            "data: {\"choices\":[{\"delta\":{\"content\":\"Hallo\"}}]}\n"
+            "\n"
+            "data: {\"choices\":[{\"delta\":{\"content\":\" Welt\"}}]}\n"
+            "\n"
+            "data: [DONE]\n");
+        NdjsonStream stream;
+        stream.setSse(true);
+        QSignalSpy objects(&stream, &NdjsonStream::objectReceived);
+        QSignalSpy finished(&stream, &NdjsonStream::finished);
+        stream.post(server.baseUrl() + "/v1/chat/completions", QVariantMap());
+        QVERIFY(finished.wait(5000));
+        QCOMPARE(objects.count(), 2);   // [DONE] ist kein Objekt
+        QCOMPARE(objects.at(0).at(0).toMap().value("choices").toList().at(0)
+                     .toMap().value("delta").toMap().value("content").toString(),
+                 QString("Hallo"));
+        QCOMPARE(objects.at(1).at(0).toMap().value("choices").toList().at(0)
+                     .toMap().value("delta").toMap().value("content").toString(),
+                 QString(" Welt"));
+    }
+
+    // SSE-Kommentarzeilen (": ping" als Keepalive) sind keine Daten.
+    void sseModus_ignoriertKommentarzeilen()
+    {
+        TestHttpServer server;
+        server.setResponse(200, ": ping\ndata: {\"a\":1}\n\ndata: [DONE]\n");
+        NdjsonStream stream;
+        stream.setSse(true);
+        QSignalSpy objects(&stream, &NdjsonStream::objectReceived);
+        QSignalSpy finished(&stream, &NdjsonStream::finished);
+        stream.post(server.baseUrl() + "/v1/chat/completions", QVariantMap());
+        QVERIFY(finished.wait(5000));
+        QCOMPARE(objects.count(), 1);
+        QCOMPARE(objects.at(0).at(0).toMap().value("a").toInt(), 1);
+    }
+
+    // Default bleibt NDJSON: ohne sse=true ist "data: {...}" kein gueltiges
+    // JSON und wird wie bisher als defekte Zeile verworfen.
+    void ohneSseModus_bleibtNdjsonVerhalten()
+    {
+        TestHttpServer server;
+        server.setResponse(200, "data: {\"a\":1}\n{\"b\":2}\n");
+        NdjsonStream stream;
+        QSignalSpy objects(&stream, &NdjsonStream::objectReceived);
+        QSignalSpy finished(&stream, &NdjsonStream::finished);
+        stream.post(server.baseUrl() + "/x", QVariantMap());
+        QVERIFY(finished.wait(5000));
+        QCOMPARE(objects.count(), 1);
+        QCOMPARE(objects.at(0).at(0).toMap().value("b").toInt(), 2);
+    }
 };
 
 QTEST_GUILESS_MAIN(TestNdjsonStream)

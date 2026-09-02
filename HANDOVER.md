@@ -1,4 +1,4 @@
-# Übergabe: Backend-Registry, KWallet und OpenRouter
+# Übergabe: Backend-Registry, KWallet, OpenRouter (Phasen 1–5)
 
 Stand: 02.09.2026 · Branch `feature/openai-backend`
 
@@ -10,11 +10,12 @@ wo das Projekt steht, was unmittelbar zu tun ist und welche Konventionen gelten.
 ## 1. Sofortlage
 
 ```
-Branch:   feature/openai-backend  (8 Commits, gepusht nach origin)
+Branch:   feature/openai-backend  (14 Commits, gepusht nach origin)
 main:     unberührt bei c2ac749
 ```
 
-**Testlage: 45 von 45 Testzielen grün** (davon `tst_modelmanager` 29/29, `tst_keyring` 8/8).
+**Testlage: 47 von 47 Testzielen grün** (davon `tst_modelmanager` 35/35, `tst_openaiclient` 35/35,
+`tst_keyring` 8/8, `tst_header` 6/6, `test_fileio` 25/25).
 
 ```bash
 cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
@@ -47,41 +48,57 @@ ctest --test-dir build --output-on-failure
   `keyRef`, das Secret liegt im Wallet (Ordner `net.niuton.aurora`).
 - **Env-Rückfall**: `AURORA_<KEY>_KEY` (z.B. `AURORA_OPENROUTER_KEY`) wird beim Lesen zuerst geprüft —
   für kopf-losen Betrieb ohne Wallet-Prompt.
-- **Fehlersemantik**: Abwesenheit eines Eintrags ist `ok:true` mit leerem `secret` (kein Fehler);
-  Open-Fehler (vom Nutzer verneint / Wallet zu) sind echte Fehler; `walletClosed` invalidiert den
-  Handle-Cache (nächster Zugriff öffnet neu); parallele Anfragen während des Öffnens werden gequeued.
 - **Testbarkeit**: D-Bus-Connection injizierbar; `test_keyring.cpp` startet einen privaten
   `dbus-daemon` (Subprozess) mit Fake-kwalletd6 als `QDBusAbstractAdaptor` (exportiert die echte
   `org.kde.KWallet`-Schnittstelle). Läuft ganz ohne Desktop-Session.
-- **UI**: KCM-Sektion „OpenRouter (Cloud)" in `ConfigModels.qml` — explizites Opt-in + Schlüsselfeld
-  (schreibt ins Wallet, zeigt den Wert nie, `echoMode: PasswordEchoOnEdit`).
+- **UI**: KCM-Sektion „OpenRouter (Cloud)" in `ConfigModels.qml` — explizites Opt-in + Schlüsselfeld.
+
+### 2.3 Phasen 3–5 — OpenRouter-Backend komplett — `8f53660` … `a02ee34`
+
+**Phase 3a (Auth, `8f53660`):** `OpenAiClient` bekommt injizierbares `keyring` + `keyRef`; löst den
+Schlüssel genau einmal auf (Cache, bei `keyRef`-Wechsel invalidiert — kein fremder Key fürs falsche
+Backend). `refreshModels/chat/embed` senden `Authorization: Bearer …` nur bei bekanntem Key (kein
+Empty-Bearer). `OpenAiChatJob` reicht `headers` an den Stream.
+
+**Phase 3b (Startset/Favoriten/Suche, `377de21` + `cd31322`):** Live gegen die API verifiziert:
+425 OpenRouter-Modelle; kostenlos = `pricing 0/0` → **exakt 21**. Whitelist in
+`OpenRouterFreeStart.qml` (id → Name/Kontextlänge, Account-Stand 02.09.2026). Config-Key
+`openrouterFavorites` (JSON-Array, Default leer → Startset). Picker zeigt entweder Suchtreffer
+(`cloudSearch`, filtert die 425) oder Favoriten/Startset; Kontextlänge als Label-Suffix
+(„… · 200K"). **Picker-UI**: `Header.qml` nutzt Button + Popup mit Suchfeld statt ComboBox
+(flache Liste wäre unbenutzbar); Suche setzt sich beim Schließen zurück. Signal
+`cloudSearchChanged` → `AuroraController.setCloudSearch` → `ModelManager.cloudSearch`.
+
+**Phase 4 (Eingabe-Modalitäten, `cd31322`):** `OpenAiClient._mapMessages`: Ollama-Format
+(`message.images` als Base64-Liste) → OpenAI-`content`-Array mit `image_url`-Teilen (MIME-Default
+png; Original wird nie mutiert — der ChatController hält dieselbe History in beiden Welten).
+
+**Phase 5a (Kosten, `0230856`):** Fakten (Archiv-Doku): Stream liefert id + finalen usage-Chunk;
+Kosten nur über `GET /v1/generation?id=…` (`data.total_cost`, Auth). `OpenAiChatJob` erfasst beides;
+bei `fetchCost` (nur Cloud) holt er die Kosten best-effort NACH dem Stream (Timeout 15 s, Fehler
+verwirft die Antwort nicht). `ChatController` schreibt usage/cost/generationId ins `extra` der
+finalen Message.
+
+**Phase 5b (Bild-Ausgabe, `a02ee34`):** Nutzerentscheidung: **nur explizit** (aktives Bildmodell),
+**non-streaming** (SSE-Bildstruktur offiziell nicht spezifiziert; non-streaming ist dokumentiert).
+`FileIO.writeBase64` (atomar, Fehler ohne Datei). `OpenAiClient.generateImage`
+(`modalities:["image","text"]`). `ModelManager.generateImage` delegiert nur an Clients mit
+`generateImage` (Auto-Modus/lokal → Fehler). `GenerateImageTool._nimmCloud`: Quellenwahl
+`ctx.genImageFn` (Cloud) vs. ComfyUI; `originConvId`-Guard wie beim ComfyUI-Weg.
+`AuroraController.imageGenFn`: Generate → data-URLs → `writeBase64` in den `images`-Ordner →
+`appendGeneratedImage` (dieselbe Bubble wie ComfyUI). 11 Modelle mit Bild-Ausgabe (API-verifiziert).
 
 ---
 
-## 3. Nächster Schritt: Phase 3 — OpenRouter als Backend
+## 3. Was noch offen ist
 
-Die Phase braucht die bisherige Arbeit (Registry + KeyRing):
-
-1. **Auth-Header**: der `OpenAiClient` braucht für Cloud-Backends einen
-   `Authorization: Bearer <key>`-Header. `Http` und `NdjsonStream.post()` können bereits Header —
-   es fehlt die Verdrahtung: `OpenAiClient` bekommt ein injizierbares `keyring` und ein `keyRef`
-   (vom ModelManager aus der Registry durchgereicht), löst den Schlüssel asynchron auf und hängt
-   den Header an `refreshModels/chat/embed` an.
-2. **Favoriten plus Suche**: die OpenRouter-API liefert **423 Modelle**; eine flache Liste im Picker
-   ist unbenutzbar. Startset laut Nutzerentscheidung: die **21 kostenlosen Modelle**. Suche im Picker
-   (filtert die Cloud-Gruppe), Favoriten als Config-Key.
-3. Modell-Metadaten (Kontextlänge, Preis) — nur was der Picker braucht.
-
-**Achtung:** der OpenRouter-Schlüssel liegt noch nicht vor — Phase 3 ist nur gegen die
-API-Dokumentation baubar, nicht gegen die echte API verifizierbar.
-
-Danach:
-
-- **Phase 4 — Eingabe-Modalitäten**: Anhänge im Ollama-Format (`message.images` als Base64-Liste)
-  vs. OpenAI `content`-Array mit `image_url`. Das Mapping gehört in den `OpenAiClient`, nicht in den
-  `ChatController`. (254 der 423 Modelle können Bild-Eingabe.)
-- **Phase 5 — Ausgabe und Kosten**: Bild-Ausgabe (11 Modelle) in dieselbe Blase wie ComfyUI-Bilder;
-  `usage.cost` je Antwort mitschreiben.
+1. **OpenRouter-Schlüssel** liegt noch nicht vor → bisher nur gegen die Doku/live Modellliste
+   verifiziert; Chat + Auth + Kosten-Lookup + Bildmodell gegen die echte API stehen aus.
+2. **PR** für `feature/openai-backend` noch nicht eröffnet.
+3. **Backup-Branch `backup/vor-ip-bereinigung`** (lokal, mit echten LAN-IPs) nicht pushen —
+   löschen, sobald der Stand abgenommen ist.
+4. **ComfyUI am LAN-Gerät** war beim Test nicht erreichbar (Gerät aus); Eintrag zeigt korrekt
+   „nicht erreichbar".
 
 ---
 
@@ -107,97 +124,61 @@ Damit war die Annahme „Decode ist bandbreitenlimitiert" **falsch** — es war 
 **Bonsai 27B ternär** (`~/.local/share/aurora/models/Ternary-Bonsai-27B-Q2_g64.gguf`, 7,59 GB) läuft
 über `llama-server` auf `:8080` mit **74 tok/s Prefill / 7,1 tok/s Decode** — ein 27B-Modell lokal.
 
-Zwei Sackgassen, die nicht erneut geprüft werden müssen:
+Sackgassen, nicht erneut prüfen:
 
 - **Ollama kann Bonsai nicht laden.** Verifiziert: Ollamas `libggml` kennt `q2_K`, `tq1_0`, `tq2_0`,
   aber **kein `q2_0`**. Deshalb der Umweg über `llama-server` und der ganze `OpenAiClient`.
-- **Der PrismML-Fork bringt nichts.** Gemessen: mit `g64` 72,2/6,7 (also minimal langsamer als
-  upstream), mit seiner eigenen `g128`-Variante 7,6/2,1 — Faktor 10 schlechter beim Prefill, die
-  g128-Kernel sind auf Vulkan nicht optimiert. **Bei upstream llama.cpp + `_g64` bleiben.**
+- **Der PrismML-Fork bringt nichts.** Gemessen: mit `g64` 72,2/6,7 (minimal langsamer als
+  upstream), mit eigener `g128`-Variante 7,6/2,1 — Faktor 10 schlechter beim Prefill, g128-Kernel
+  sind auf Vulkan nicht optimiert. **Bei upstream llama.cpp + `_g64` bleiben.**
 - **Spekulatives Decoding scheitert am Drafter.** Upstream kennt die Architektur `dspark` nicht; der
   Fork kennt sie, stolpert aber über die Tensor-Offsets (`dspark.fc.weight has offset 337718592,
-  expected 357584192`) — Fork-HEAD und veröffentlichte Datei passen nicht zusammen. Abhaken, bis
-  PrismML nachzieht.
+  expected 357584192`). Abhaken, bis PrismML nachzieht.
 
 ---
 
 ## 5. Vom Nutzer getroffene Festlegungen
 
 - **Datensouveränität ist die Leitlinie, nicht der Speicherort.** Eigene Hardware und eine selbst
-  betriebene Cloud (Nextcloud) sind gleichrangig; fremde Cloud ist die begründete Ausnahme. Daraus
-  folgte der konfigurierbare `dataPath`.
-- **Embeddings werden auf eigenen Backends berechnet**, nie in fremder Cloud. Der Speicherort der
-  Datenbank ist davon unabhängig und frei wählbar.
+  betriebene Cloud (Nextcloud) sind gleichrangig; fremde Cloud ist die begründete Ausnahme.
+- **Embeddings werden auf eigenen Backends berechnet**, nie in fremder Cloud.
 - **Bild-Erzeugung: ein gemeinsamer Weg mit Quellenwahl** (ComfyUI lokal/entfernt oder Cloud-Modell)
-  statt zweier paralleler Pfade.
+  statt zweier paralleler Pfade — umgesetzt über `generate_image`-Tool mit `ctx.genImageFn`.
 - **Auto-Modus greift nie auf ein Cloud-Backend.**
 - **Startset OpenRouter: die 21 kostenlosen Modelle** (Favoriten + Suche statt Flachliste).
+- **Bild-Ausgabe nur auf expliziten Wunsch** (aktives Bildmodell), **non-streaming** transportiert.
 
 ---
 
 ## 6. Projektkonventionen
 
 - **Test-getrieben, ohne Ausnahme.** Erst der Test, Fehlschlag beobachten, dann die Implementierung.
-  Die Suite muss grün bleiben.
-- **Kommentare auf Deutsch, Commit-Messages und README auf Englisch.** Kommentare erklären das
-  *Warum* (oft mit dem Bug, der zu der Zeile führte) — nicht das Was.
-- **Keine echten privaten IP-Adressen im Repo.** Das Repo ist öffentlich; Beispieladressen sind
-  `192.168.1.10` / `.11`. In einer früheren Session wurde die Historie deshalb einmal umgeschrieben.
+  Die Suite muss grün bleiben (47 Ziele).
+- **Kommentare auf Deutsch; Commit-Messages und README auf Englisch.** Kommentare erklären das
+  *Warum* — nicht das Was.
+- **Keine echten privaten IP-Adressen im Repo** (öffentlich); Beispieladressen `192.168.1.10` / `.11`.
 - **Primitive sind injizierbar** (`http`, `fileio`, Factories, `keyring`), damit Tests ohne Netz und
-  ohne `systemctl`/Desktop laufen. Siehe die Mock-Muster in `tst_ollamaclient_chat.qml`,
-  `tst_servicemanager.qml` und `test_keyring.cpp`.
-
-### Build und Test
-
-```bash
-cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
-cmake --build build
-ctest --test-dir build --output-on-failure
-
-# Einzelnes Ziel, mit Namen der Testfunktionen:
-ctest --test-dir build -R modelmanager -V 2>&1 | grep -E "PASS|FAIL"
-
-# Installieren (baut, testet, startet plasmashell neu):
-./install.sh
-```
-
-**Achtung:** `ctest` baut nicht selbst. Nach einer QML-Änderung erst `cmake --build build`, sonst
-läuft der Test gegen das alte Modul.
+  ohne Desktop laufen. Mock-Muster: `tst_ollamaclient_chat.qml`, `tst_servicemanager.qml`,
+  `test_keyring.cpp`, `tst_tools_generate.qml`.
+- **Bei fehlenden Fakten erst fragen/recherchieren, nicht raten.** (Bsp. Bild-Streaming-Shape.)
 
 ---
 
-## 7. Offene Punkte beim Nutzer
+## 7. Fallen, die in dieser Welle Zeit gekostet haben
 
-- **Backup-Branch `backup/vor-ip-bereinigung`** existiert nur lokal und enthält die alte Fassung
-  **mit echten LAN-IPs**. Nicht pushen. Löschen, sobald der aktuelle Stand abgenommen ist.
-- **OpenRouter-Schlüssel** liegt noch nicht vor. Ohne ihn lässt sich Phase 3 nur nach Dokumentation
-  bauen statt gegen die echte API zu verifizieren.
-- **Pull Request** für `feature/openai-backend` ist noch nicht eröffnet.
-- **Ausstehende Hardware-Verifikation**: ComfyUI auf einem anderen Rechner im LAN war beim Test
-  nicht erreichbar (Gerät aus). Der Eintrag zeigt dann korrekt „nicht erreichbar (anderer Rechner)".
-
----
-
-## 8. Fallen, die in dieser Welle Zeit gekostet haben
-
-- `pgrep -f llama-server` trifft die **eigene** Shell-Kommandozeile mit und killt die Session.
-  `pgrep -x llama-server` verwenden.
-- Qt schreibt Header-Namen kanonisch um (`HTTP-Referer` → `Http-Referer`). RFC-konform; Tests
-  müssen case-insensitiv vergleichen.
-- `qDebug()` ist im Release-Build stumm. Für Test-Diagnose `fprintf(stderr, ...)` nutzen.
-- In `tst_servicemanager` musste eine Zustands-Isolation in `init()` ergänzt werden: ein nie
-  beantworteter Mock-Runner schleppte seine Aktionssperre (`busyOf`) in den nächsten Test.
-- `git rebase --exec` mit `git commit --amend` kann zwei Commits verschmelzen und eine
-  Commit-Message verschlucken. Beim Umschreiben der Historie hinterher `git log` prüfen.
-- **Qt6 `QJSEngine` (6.11)**: `QJSValue::fromVariant()`, `QJSValue::newFunction()` und
-  `QJSEngine::newFunction()` existieren nicht mehr — für testbare C++-Logik `std::function`-Overloads
-  anbieten statt via QJSValue zu testen (Muster: `KeyRing`).
-- **`QDBusServer` ist kein vollwertiger Bus**: er beantwortet keinen `Hello`-Handshake —
-  `connectToBus` blockiert. Für D-Bus-Tests einen echten `dbus-daemon` als Subprozess starten
-  (`--nofork --print-address=1 --session`), siehe `test_keyring.cpp`.
-- **QDBusAbstractAdaptor respektiert `Q_CLASSINFO("D-Bus Interface", ...)`** — ein plain QObject
-  exportiert nur `local.<Klassenname>`; ohne den Adaptor findet der Client die Schnittstelle nicht.
-- **`QT_NO_CAST_FROM_ASCII`** (KF6-Kompilat): in Core-Quellen keine rohen `"..."`-Strings an
-  `QString`-Parameter; `QStringLiteral` verwenden.
-- **Env-Variablen in Tests**: `openCalls` und ähnliche Fake-Zähler in `init()` zurücksetzen, sonst
-  schleppt ein Test Zustand in den nächsten (Interferenz nur in der Gesamtsuite, isoliert grün).
+- `pgrep -f llama-server` trifft die **eigene** Shell-Kommandozeile mit. `pgrep -x` verwenden.
+- Qt schreibt Header-Namen kanonisch um (`HTTP-Referer` → `Http-Referer`). Tests case-insensitiv.
+- `qDebug()` ist im Release-Build stumm. `fprintf(stderr, …)` für Test-Diagnose.
+- In `tst_servicemanager`: nie beantworteter Mock-Runner schleppte seine Aktionssperre in den
+  nächsten Test → Zustands-Isolation in `init()`.
+- `git rebase --exec` + `--amend` kann zwei Commits verschmelzen/message schlucken. Historie prüfen.
+- **Qt6 `QJSEngine` (6.11)**: `QJSValue::fromVariant()`, `newFunction()` existieren nicht mehr —
+  `std::function`-Overloads für testbare C++-Logik (Muster: `KeyRing`).
+- **`QDBusServer` ist kein vollwertiger Bus** (kein Hello-Handshake, `connectToBus` blockiert) —
+  echten `dbus-daemon` als Subprozess: `--nofork --print-address=1 --session` (`test_keyring.cpp`).
+- **`QDBusAbstractAdaptor` + `Q_CLASSINFO("D-Bus Interface", …)`** — ein plain QObject exportiert
+  nur `local.<Klassenname>`.
+- **`QT_NO_CAST_FROM_ASCII`**: in Core keine rohen `"…"`-Strings an `QString`; `QStringLiteral`.
+- **Test-Isolation**: Fake-Zähler in `init()` zurücksetzen; im QML erst Zustand resetten, DANN
+  Signal-Spys leeren (sonst zählt der Reset-Bump mit). QML-IDs außerhalb des Objekts nicht
+  auflösbar — Test-Hooks als Properties (Muster `tst_header.qml`).

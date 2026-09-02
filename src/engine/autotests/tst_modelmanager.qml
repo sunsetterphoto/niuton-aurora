@@ -532,8 +532,8 @@ TestCase {
         mgr.refresh()
         var i = mockHttp.find("openrouter.ai/api/v1/models")
         verify(i !== -1)
-        mockHttp.answer(i, { "ok": true, "data": { "data": [{ "id": "google/gemini-3.8-flash" }] } })
-        mgr.selectModel("openrouter:google/gemini-3.8-flash")
+        mockHttp.answer(i, { "ok": true, "data": { "data": [{ "id": "openrouter/free" }] } })
+        mgr.selectModel("openrouter:openrouter/free")
         compare(mgr.activeBackendId, "openrouter")
         compare(mgr.isCloudActive, true)
     }
@@ -549,7 +549,29 @@ TestCase {
         compare(mockKeyring.reads[0], "openrouter")
         var i = mockHttp.find("openrouter.ai/api/v1/models")
         verify(i !== -1)
-        mockHttp.answer(i, { "ok": true, "data": { "data": [{ "id": "google/gemini-3.8-flash" }] } })
+        mockHttp.answer(i, { "ok": true, "data": { "data": [{ "id": "openrouter/free" }] } })
+    }
+
+    // Favoriten-Filter: das Startset (21 freie Modelle) erscheint im Picker;
+    // bezahlte Modelle tauchen NICHT auf (425 flach wären unbenutzbar).
+    function test_pickerZeigtNurFreieCloudModelle() {
+        mgr.keyring = mockKeyring
+        ConfigStore.setValue("openrouterEnabled", true)
+        mgr.refresh()
+        var i = mockHttp.find("openrouter.ai/api/v1/models")
+        verify(i !== -1)
+        mockHttp.answer(i, { "ok": true, "data": { "data": [
+            { "id": "openrouter/free" },
+            { "id": "google/gemini-3.8-flash" }   // bezahlt — bleibt weg
+        ] } })
+        var gefunden = false
+        var bezahltGefunden = false
+        for (var k = 0; k < mgr.pickerEntries.length; k++) {
+            if (mgr.pickerEntries[k].value === "openrouter:openrouter/free") gefunden = true
+            if (mgr.pickerEntries[k].value === "openrouter:google/gemini-3.8-flash") bezahltGefunden = true
+        }
+        verify(gefunden)
+        verify(!bezahltGefunden)
     }
 
     // Bestandsauswahl "remote:<modell>" muss weiter funktionieren: sie zeigt

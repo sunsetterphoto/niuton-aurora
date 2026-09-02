@@ -14,6 +14,7 @@ ecm_target_qml_sources(auroraengine SOURCES
     qml/ChatJob.qml
     qml/OpenAiClient.qml
     qml/OpenAiChatJob.qml
+    qml/OpenRouterFreeStart.qml
     qml/ModelManager.qml
     qml/ModelStore.qml
     qml/ServiceManager.qml
@@ -69,6 +70,7 @@ if(BUILD_TESTING)
     aurora_engine_qmltest(tst_aurorasettings
         "AURORA_CONFIG_PATH=${CMAKE_BINARY_DIR}/tst_aurorasettings.rc")
     aurora_engine_qmltest(tst_openaiclient)
+    aurora_engine_qmltest(tst_openrouterfreestart)
     aurora_engine_qmltest(tst_ollamaclient_models)
     aurora_engine_qmltest(tst_ollamaclient_chat)
     aurora_engine_qmltest(tst_ollamaclient_embed)

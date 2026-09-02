@@ -39,6 +39,8 @@ QtObject {
     // eine Instanz der zu seiner Sorte passenden Client-Klasse.
     property Component _openaiFactory: Component { OpenAiClient {} }
     property var _extraClients: ({})       // backendId -> Client
+    // Startset-Wissensbasis der kostenlosen OpenRouter-Modelle (Picker-Filter)
+    property var _openRouterFreeStart: OpenRouterFreeStart {}
 
     readonly property var backends: settings ? settings.backends : []
     onBackendsChanged: _syncExtraClients()
@@ -123,7 +125,10 @@ QtObject {
         // Weitere Backends in Registry-Reihenfolge. Ohne Größenangabe: die
         // OpenAI-API kennt weder Dateigröße noch Ladezustand. Cloud-Backends
         // tragen die Wolke im Gruppentitel — wer Daten aus dem Haus gibt, soll
-        // das im Picker sehen.
+        // das im Picker sehen. OpenRouter zeigt außerdem NUR das freie
+        // Startset (21 Modelle): die API liefert 425 Einträge, eine flache
+        // Liste wäre unbenutzbar. Fällt das Startset leer aus (API-Wechsel),
+        // bleiben alle sichtbar, damit nichts verschwindet.
         for (var bi = 0; bi < backends.length; bi++) {
             var b = backends[bi]
             if (!_isExtra(b)) continue
@@ -131,10 +136,24 @@ QtObject {
             if (!c || c.models.length === 0) continue
             e.push({ "label": b.cloud ? (b.label + " ☁") : b.label,
                      "value": "", "kind": "header", "enabled": false })
-            for (var mi = 0; mi < c.models.length; mi++)
+            var gezeigt = 0
+            for (var mi = 0; mi < c.models.length; mi++) {
+                var cname = c.models[mi].name
+                if (b.cloud && _openRouterFreeStart
+                        && Object.keys(_openRouterFreeStart.models).length > 0
+                        && !_openRouterFreeStart.isFree(cname))
+                    continue
                 e.push({ "label": c.models[mi].name,
-                         "value": b.id + ":" + c.models[mi].name,
+                         "value": b.id + ":" + cname,
                          "kind": b.cloud ? "cloud" : "extra", "enabled": true })
+                gezeigt++
+            }
+            if (gezeigt === 0 && c.models.length > 0) {
+                for (var mi2 = 0; mi2 < c.models.length; mi2++)
+                    e.push({ "label": c.models[mi2].name,
+                             "value": b.id + ":" + c.models[mi2].name,
+                             "kind": b.cloud ? "cloud" : "extra", "enabled": true })
+            }
         }
         return e
     }

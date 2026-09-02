@@ -1,0 +1,41 @@
+# ComfyUI (Bildgenerierung) als rootless Podman-Quadlet.
+#
+# NUR für eine LOKALE Instanz nötig. Läuft ComfyUI auf einem anderen
+# Rechner, trage dessen Adresse unter Einstellungen → Bilder als
+# comfyEndpoint ein und lass comfyEndpointLocal leer — dann erwartet
+# Aurora hier gar keine Unit und zeigt den Dienst nur als entfernt
+# erreichbar an. Dieses Quadlet wird in dem Fall nicht gebraucht.
+#
+# Installation:  ./install.sh --with-quadlets
+# Danach:        systemctl --user daemon-reload
+#
+# Der Unit-Name MUSS "comfyui" ergeben (Dateiname comfyui.container).
+#
+# BEWUSST OHNE [Install]: kein Autostart beim Login (dGPU-Power-Policy).
+
+[Unit]
+Description=ComfyUI (Bildgenerierung) für Aurora
+After=network-online.target
+
+[Container]
+# ComfyUI hat kein offizielles Container-Image — PRÜFE UND SETZE HIER
+# das Image, das zu deiner Hardware passt (AMD/ROCm, NVIDIA/CUDA oder CPU).
+# Beispiel für eine ROCm-Variante; ohne passendes Image startet die Unit nicht.
+Image=localhost/comfyui:local
+ContainerName=comfyui
+# Nur an localhost binden: ComfyUI hat keine Authentifizierung.
+# 8188 ist der Default aus comfyEndpointLocal.
+PublishPort=127.0.0.1:8188:8188
+# Modelle und Ausgaben liegen außerhalb des Containers.
+Volume=%h/.local/share/aurora/comfyui/models:/opt/ComfyUI/models:Z
+Volume=%h/.local/share/aurora/comfyui/output:/opt/ComfyUI/output:Z
+# AMD-GPU durchreichen (bei NVIDIA stattdessen AddDevice=nvidia.com/gpu=all):
+AddDevice=/dev/dri
+AddDevice=/dev/kfd
+# Für /dev/kfd braucht der Nutzer Mitgliedschaft in "render" und "video".
+GroupAdd=keep-groups
+
+[Service]
+Restart=on-failure
+RestartSec=5
+TimeoutStartSec=900

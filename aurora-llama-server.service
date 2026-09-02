@@ -1,0 +1,38 @@
+[Unit]
+# llama-server als OpenAI-kompatibles Backend (z.B. Ternary Bonsai 27B).
+# Ollama kann diese Modelle nicht laden: seinem ggml fehlt der q2_0-Typ.
+#
+# Einrichtung:
+#   1. llama.cpp mit Vulkan bauen (AMD-iGPU) oder CUDA/ROCm nach Hardware:
+#        cmake -B build -DGGML_VULKAN=ON -DCMAKE_BUILD_TYPE=Release -G Ninja
+#        cmake --build build -j
+#      Voraussetzungen auf Fedora: glslc, spirv-headers-devel, spirv-tools-devel
+#   2. Modell nach ~/.local/share/aurora/models/ legen. Für Bonsai die
+#      _g64-Datei nehmen — die group-128-Varianten laufen NUR im PrismML-Fork,
+#      group-64 ist das Format, das llama.cpp upstream unterstützt.
+#   3. Pfade unten anpassen, dann:
+#        cp aurora-llama-server.service ~/.config/systemd/user/
+#        systemctl --user daemon-reload
+#        systemctl --user enable --now aurora-llama-server
+#   4. In Aurora unter Einstellungen den OpenAI-Endpunkt auf
+#      http://127.0.0.1:8080 setzen.
+Description=llama.cpp Server (OpenAI-kompatibles Backend für Aurora)
+After=network.target
+
+[Service]
+# PASSE DIESE ZWEI PFADE AN:
+Environment=LLAMA_BIN=%h/src/llama.cpp/build/bin/llama-server
+Environment=LLAMA_MODEL=%h/.local/share/aurora/models/Ternary-Bonsai-27B-Q2_g64.gguf
+# -ngl 99 legt alle Layer auf die GPU. Auf einer iGPU ist das trotzdem
+# sinnvoll: der Speicher ist ohnehin geteilt, und die GPU rechnet pro Watt
+# deutlich effizienter als die CPU.
+# 8080, NICHT 8000/8001: dort liegen Speaches bzw. aichat.
+ExecStart=/bin/sh -c 'exec "$LLAMA_BIN" -m "$LLAMA_MODEL" -ngl 99 -c 8192 \
+    --host 127.0.0.1 --port 8080 --alias bonsai-27b-ternary'
+Restart=on-failure
+RestartSec=5
+# Das Modell wird beim Start vollständig eingelesen.
+TimeoutStartSec=600
+
+[Install]
+WantedBy=default.target

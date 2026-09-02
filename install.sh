@@ -9,6 +9,23 @@ ENV_FILE="$HOME/.config/plasma-workspace/env/path.sh"
 QML_PATHS="$PREFIX/lib64/qml:$PREFIX/lib/qml"
 PLASMOID_DIR="$PREFIX/share/plasma/plasmoids/org.kde.aurora"
 STAGE="$SCRIPT_DIR/build/stage"
+QUADLET_DIR="$HOME/.config/containers/systemd"
+
+# Quadlets nur auf ausdrücklichen Wunsch: sie ziehen Container-Images und
+# gehören nicht in eine reine App-Installation. Wer ComfyUI/Speaches auf einem
+# ANDEREN Rechner betreibt, braucht sie gar nicht.
+WITH_QUADLETS=0
+for arg in "$@"; do
+    case "$arg" in
+        --with-quadlets) WITH_QUADLETS=1 ;;
+        -h|--help)
+            echo "Aufruf: $0 [--with-quadlets]"
+            echo "  --with-quadlets  Podman-Quadlets für ComfyUI/Speaches nach"
+            echo "                   $QUADLET_DIR kopieren (überschreibt nichts)"
+            exit 0 ;;
+        *) echo "Unbekannte Option: $arg (siehe --help)" >&2; exit 1 ;;
+    esac
+done
 
 echo "=== Aurora Installation (Prefix: $PREFIX) ==="
 
@@ -68,6 +85,25 @@ chmod +x "$PREFIX/bin/aurora-transcribe"
 # ComfyUI-Workflow-Templates in den Datenpfad (ComfyClient liest sie von dort)
 mkdir -p "$HOME/.local/share/aurora/workflows"
 cp "$SCRIPT_DIR"/src/engine/workflows/*.json "$HOME/.local/share/aurora/workflows/"
+
+if [ "$WITH_QUADLETS" = "1" ]; then
+    echo "  Quadlets nach $QUADLET_DIR …"
+    mkdir -p "$QUADLET_DIR"
+    for q in "$SCRIPT_DIR"/quadlets/*.container; do
+        [ -e "$q" ] || continue
+        name="$(basename "$q")"
+        # Vorhandene NICHT überschreiben: sie sind Vorlagen, die angepasst
+        # gehören (Image, GPU-Geräte, Ports).
+        if [ -e "$QUADLET_DIR/$name" ]; then
+            echo "    $name existiert bereits — unverändert gelassen"
+        else
+            cp "$q" "$QUADLET_DIR/$name"
+            echo "    $name installiert (Image/GPU-Zeilen prüfen!)"
+        fi
+    done
+    systemctl --user daemon-reload
+    echo "    Kein Autostart: Start über Aurora > Einstellungen > Dienste"
+fi
 
 mkdir -p "$(dirname "$ENV_FILE")"
 if ! grep -qs "QML_IMPORT_PATH" "$ENV_FILE" 2>/dev/null; then

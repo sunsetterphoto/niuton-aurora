@@ -1,0 +1,36 @@
+# Speaches (Spracherkennung + Sprachausgabe) als rootless Podman-Quadlet.
+#
+# Installation:  ./install.sh --with-quadlets   (oder von Hand nach
+#                ~/.config/containers/systemd/ kopieren)
+# Danach:        systemctl --user daemon-reload
+# Starten:       über Aurora → Einstellungen → Dienste, oder
+#                systemctl --user start speaches
+#
+# Der Unit-Name MUSS "speaches" ergeben (Dateiname speaches.container),
+# denn der ServiceManager schaltet die Units über ihre Dienst-ID.
+#
+# BEWUSST OHNE [Install]: kein Autostart beim Login. Aurora startet den
+# Dienst auf Wunsch (servicesAutoStart) oder per Knopf — auf Geräten mit
+# dedizierter GPU soll das Modell nicht ungefragt Strom ziehen.
+
+[Unit]
+Description=Speaches (STT/TTS) für Aurora
+After=network-online.target
+
+[Container]
+# CPU-Variante. Mit NVIDIA-GPU stattdessen :latest-cuda verwenden und
+# AddDevice=nvidia.com/gpu=all ergänzen.
+Image=ghcr.io/speaches-ai/speaches:latest-cpu
+ContainerName=speaches
+# Nur an localhost binden: der Dienst hat keine Authentifizierung.
+# 8000 ist der Default aus speachesEndpoint — wird er dort geändert,
+# muss der Port hier mitziehen.
+PublishPort=127.0.0.1:8000:8000
+# Heruntergeladene Modelle überleben ein Neuanlegen des Containers.
+Volume=%h/.local/share/aurora/speaches-cache:/home/ubuntu/.cache/huggingface:Z
+
+[Service]
+Restart=on-failure
+RestartSec=5
+# Der erste Start lädt die Modelle herunter — das dauert.
+TimeoutStartSec=900

@@ -3,7 +3,10 @@ Description=Aurora AI Backend (aichat serve)
 After=network.target
 
 [Service]
-ExecStart=%h/.cargo/bin/aichat --serve 127.0.0.1:8000
+# Port 8001, NICHT 8000: dort lauscht Speaches (dessen konventioneller
+# Port, siehe speachesEndpoint-Default). Der aichat-Port ist frei
+# waehlbar, also weicht dieser aus.
+ExecStart=%h/.cargo/bin/aichat --serve 127.0.0.1:8001
 Restart=on-failure
 RestartSec=5
 

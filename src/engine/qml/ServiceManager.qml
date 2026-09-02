@@ -18,12 +18,43 @@ QtObject {
     property int pollIntervalMs: 2000
     property int startTimeoutS: 300
 
-    readonly property var services: [
-        { "id": "comfyui", "label": "ComfyUI (Bildgenerierung)",
-          "endpoint": "http://127.0.0.1:8188", "healthPath": "/queue" },
-        { "id": "speaches", "label": "Speaches (Sprache ein/aus)",
-          "endpoint": "http://127.0.0.1:8000", "healthPath": "/health" }
-    ]
+    // AuroraSettings (Pflicht): die Endpunkte sind KONFIGURIERT, nicht fest
+    // verdrahtet. Vorher standen sie hier doppelt — einmal hier, einmal in den
+    // Settings, die an die Clients gingen; eine abweichende Einstellung lief
+    // an diesem Manager vorbei.
+    property var settings: null
+
+    // Abgeleitet: ein Dienst existiert nur mit Endpunkt. "manageable" trennt
+    // die lokale Instanz (systemd-Unit, start/stop) von einer entfernten, die
+    // auf einem anderen Rechner läuft — dort gibt es keine Unit zu schalten,
+    // nur den Gesundheitszustand zu zeigen.
+    readonly property var services: {
+        var out = []
+        if (!settings)
+            return out
+        // Lokal hat Vorrang: läuft hier eine Instanz, ist sie die verwaltbare.
+        var comfyLocal = settings.comfyEndpointLocal || ""
+        var comfyRemote = settings.comfyEndpoint || ""
+        var comfy = comfyLocal !== "" ? comfyLocal : comfyRemote
+        if (comfy !== "")
+            out.push({ "id": "comfyui", "label": "ComfyUI (Bildgenerierung)",
+                       "endpoint": comfy, "healthPath": "/queue",
+                       "manageable": _isLocal(comfy) })
+        var sp = settings.speachesEndpoint || ""
+        if (sp !== "")
+            out.push({ "id": "speaches", "label": "Speaches (Sprache ein/aus)",
+                       "endpoint": sp, "healthPath": "/health",
+                       "manageable": _isLocal(sp) })
+        return out
+    }
+
+    // Verwaltbar ist, was auf dieser Maschine lauscht — nur dort kann eine
+    // User-Unit existieren.
+    function _isLocal(url) {
+        return url.indexOf("//127.0.0.1") !== -1
+            || url.indexOf("//localhost") !== -1
+            || url.indexOf("//[::1]") !== -1
+    }
 
     // Zustand je Dienst: "unknown" | "inactive" | "failed" | "starting" |
     // "stopping" | "active" (active = Unit aktiv; gesund = healthy[id])
@@ -35,7 +66,16 @@ QtObject {
     property var _runners: ({})   // id -> laufender ProcessRunner (Aktions-Sperre)
     property var _polls: ({})     // id -> verbleibende Poll-Ticks nach Start
 
-    function stateOf(id) { return states[id] || "unknown" }
+    // Entfernte Dienste haben keinen Unit-Zustand — "remote" statt einer
+    // Unit-Aussage, die es hier nicht gibt.
+    function stateOf(id) {
+        if (!manageableOf(id)) return "remote"
+        return states[id] || "unknown"
+    }
+    function manageableOf(id) {
+        var s = serviceById(id)
+        return s ? s.manageable === true : false
+    }
     function healthyOf(id) { return !!healthy[id] }
     function busyOf(id) { return _runners[id] !== undefined }
 
@@ -54,14 +94,14 @@ QtObject {
     }
 
     function start(id) {
-        if (busyOf(id)) return false
+        if (busyOf(id) || !manageableOf(id)) return false
         _setState(id, "starting")
         _polls = _bump(_polls, id, Math.max(1, Math.round(startTimeoutS * 1000 / pollIntervalMs)))
         _run(id, ["start", id], function(code, out, err, timedOut) {
             if (code !== 0) {
                 svc._polls = _bump(svc._polls, id, 0)
                 _setState(id, "failed")
-                actionFinished(id, false, "Start fehlgeschlagen: " + (err || out || "Exit " + code))
+                actionFinished(id, false, _startFehlerText(err || out || "Exit " + code))
                 return
             }
             pollTimer.start()
@@ -70,7 +110,7 @@ QtObject {
     }
 
     function stop(id) {
-        if (busyOf(id)) return false
+        if (busyOf(id) || !manageableOf(id)) return false
         _setState(id, "stopping")
         _polls = _bump(_polls, id, 0)
         _run(id, ["stop", id], function(code, out, err, timedOut) {
@@ -100,7 +140,7 @@ QtObject {
     }
 
     function _probeUnit(id) {
-        if (busyOf(id)) return
+        if (busyOf(id) || !manageableOf(id)) return
         _run(id, ["is-active", id], function(code, out, err, timedOut) {
             var s = (out || "").trim()
             // is-active: Exit 0 nur bei "active"; sonst inactive/failed/unknown
@@ -131,6 +171,16 @@ QtObject {
     }
 
     // systemctl --user <args[0]> <args[1]>; cb(exitCode, stdout, stderr, timedOut)
+    // systemd meldet eine fehlende Unit als "not found" — das ist kein
+    // Startfehler des Dienstes, sondern fehlende Einrichtung. Getrennt
+    // benannt, sonst sucht man den Fehler an der falschen Stelle.
+    function _startFehlerText(meldung) {
+        var m = String(meldung)
+        if (m.indexOf("not found") !== -1 || m.indexOf("not be found") !== -1)
+            return "Dienst nicht eingerichtet (systemd-Unit fehlt): " + m
+        return "Start fehlgeschlagen: " + m
+    }
+
     function _run(id, args, cb) {
         svc._runners = _bump(svc._runners, id, runnerFactory.createObject(svc, { "timeoutMs": 30000 }))
         var r = svc._runners[id]

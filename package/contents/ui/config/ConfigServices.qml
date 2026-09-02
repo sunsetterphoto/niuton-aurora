@@ -12,7 +12,10 @@ import net.niuton.aurora.engine
 KCM.SimpleKCM {
     id: root
 
-    ServiceManager { id: svc }
+    // Die Endpunkte stehen in den Settings; der Manager leitet seine
+    // Dienstliste daraus ab (statt sie fest verdrahtet zu haben).
+    AuroraSettings { id: cfg }
+    ServiceManager { id: svc; settings: cfg }
 
     property string actionMessage: ""
     property bool actionIsError: false
@@ -35,6 +38,10 @@ KCM.SimpleKCM {
 
     function _stateText(id) {
         var s = svc.stateOf(id)
+        // Entfernte Instanz: hier gibt es keine Unit — nur Erreichbarkeit.
+        if (s === "remote")
+            return svc.healthyOf(id) ? "erreichbar (anderer Rechner)"
+                                     : "nicht erreichbar (anderer Rechner)"
         if (s === "active") return svc.healthyOf(id) ? "läuft (gesund)" : "läuft (Health ausstehend)"
         if (s === "starting") return "startet …"
         if (s === "stopping") return "stoppt …"
@@ -45,6 +52,8 @@ KCM.SimpleKCM {
 
     function _stateColor(id) {
         var s = svc.stateOf(id)
+        if (s === "remote") return svc.healthyOf(id) ? Kirigami.Theme.positiveTextColor
+                                                     : Kirigami.Theme.disabledTextColor
         if (s === "active") return svc.healthyOf(id) ? Kirigami.Theme.positiveTextColor
                                                      : Kirigami.Theme.neutralTextColor
         if (s === "starting" || s === "stopping") return Kirigami.Theme.neutralTextColor
@@ -94,14 +103,17 @@ KCM.SimpleKCM {
 
                 QQC2.Button {
                     text: "Starten"
-                    visible: svc.stateOf(svcRow.modelData.id) !== "active"
+                    // Entfernte Dienste lassen sich von hier nicht schalten.
+                    visible: svcRow.modelData.manageable
+                        && svc.stateOf(svcRow.modelData.id) !== "active"
                     enabled: !svc.busyOf(svcRow.modelData.id)
                         && svc.stateOf(svcRow.modelData.id) !== "starting"
                     onClicked: svc.start(svcRow.modelData.id)
                 }
                 QQC2.Button {
                     text: "Stoppen"
-                    visible: svc.stateOf(svcRow.modelData.id) === "active"
+                    visible: svcRow.modelData.manageable
+                        && svc.stateOf(svcRow.modelData.id) === "active"
                     enabled: !svc.busyOf(svcRow.modelData.id)
                     onClicked: svc.stop(svcRow.modelData.id)
                 }

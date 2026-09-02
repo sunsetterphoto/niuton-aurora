@@ -31,6 +31,16 @@ TestCase {
         }
     }
 
+    // Fake für die Schlüssel-Primitive (Cloud-Backend-Tests ohne KWallet)
+    QtObject {
+        id: mockKeyring
+        property var reads: []
+        function readSecret(keyRef, cb) {
+            reads.push(keyRef)
+            cb({ "ok": true, "secret": "sk-test" })
+        }
+    }
+
     // Eigene Id (nicht "settings"): ModelManager hat selbst eine Property
     // "settings" — "settings: settings" im Component unten würde sonst auf
     // die eigene (noch ungesetzte) Property zeigen statt auf dieses Objekt
@@ -52,6 +62,7 @@ TestCase {
 
     function init() {
         mockHttp.calls = []
+        mockKeyring.reads = []
         persistSpy.clear()
         // Sterbenden Manager VOR dem Config-Reset deaktivieren + zerstören
         // (destroy() ist deferred — ohne active=false reagiert der noch
@@ -513,7 +524,10 @@ TestCase {
     }
 
     // Wer ein Cloud-Modell wählt, bekommt es — aber sichtbar markiert.
+    // (keyref-Durchreichung: ohne Mock-KeyRing würde hier das echte KWallet
+    // asynchron antworten und der Test wäre nicht deterministisch.)
     function test_cloudAuswahlWirdAlsSolcheGemeldet() {
+        mgr.keyring = mockKeyring
         ConfigStore.setValue("openrouterEnabled", true)
         mgr.refresh()
         var i = mockHttp.find("openrouter.ai/api/v1/models")
@@ -522,6 +536,20 @@ TestCase {
         mgr.selectModel("openrouter:google/gemini-3.8-flash")
         compare(mgr.activeBackendId, "openrouter")
         compare(mgr.isCloudActive, true)
+    }
+
+    // Cloud-Backend bekommt seine Schlüssel-Auflösung: der ModelManager
+    // reicht keyring + keyRef aus der Registry an den OpenAiClient weiter —
+    // ohne diesen Weg käme kein Authorization-Header an.
+    function test_cloudBackendBekommtKeyRefUndKeyring() {
+        ConfigStore.setValue("openrouterEnabled", true)
+        mgr.keyring = mockKeyring
+        mgr.refresh()
+        compare(mockKeyring.reads.length, 1)
+        compare(mockKeyring.reads[0], "openrouter")
+        var i = mockHttp.find("openrouter.ai/api/v1/models")
+        verify(i !== -1)
+        mockHttp.answer(i, { "ok": true, "data": { "data": [{ "id": "google/gemini-3.8-flash" }] } })
     }
 
     // Bestandsauswahl "remote:<modell>" muss weiter funktionieren: sie zeigt

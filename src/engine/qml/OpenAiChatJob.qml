@@ -20,6 +20,8 @@ QtObject {
     property Component streamFactory: null
     property string url: ""
     property var payload: null
+    // Auth-Header für Cloud-Backends (OpenRouter): vom Client aufgelöst
+    property var headers: null
 
     property string content: ""
     property string thinkingText: ""
@@ -47,7 +49,7 @@ QtObject {
         _stream = streamFactory.createObject(job, { "idleTimeoutMs": 90000, "sse": true })
         _stream.objectReceived.connect(_onChunk)
         _stream.finished.connect(_onFinished)
-        _stream.post(url, payload)
+        _stream.post(url, payload, headers || {})
     }
 
     function _onChunk(chunk) {

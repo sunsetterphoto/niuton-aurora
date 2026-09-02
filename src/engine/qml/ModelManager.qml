@@ -11,6 +11,8 @@ QtObject {
     property var settings: null            // AuroraSettings (Pflicht)
     property var fileio: Core.FileIO
     property var http: Core.Http
+    // Schlüssel-Primitive für Cloud-Backends (Tests: Mock statt KWallet)
+    property var keyring: Core.KeyRing
     onHttpChanged: {
         localClient.http = http
         remoteClient.http = http
@@ -160,14 +162,22 @@ QtObject {
                 delete cur[id]
             }
         }
+        // Vorhandene Clients nachziehen, neue anlegen. keyring wird hier
+        // immer aktualisiert (wie http über onHttpChanged): die Registry kann
+        // den Backends-Wechsel auslösen, bevor eine neu injizierte Primitive
+        // gesetzt war — sonst bliebe der alte (echte) KeyRing stehen.
         for (var sid in soll) {
             var b = soll[sid]
             if (cur[sid]) {
                 cur[sid].baseUrl = b.endpoint
                 cur[sid].http = mgr.http
+                cur[sid].keyring = mgr.keyring
+                // keyRef aus der Registry nachziehen (Cloud-Backends)
+                if (b.keyRef) cur[sid].keyRef = b.keyRef
             } else {
                 cur[sid] = _openaiFactory.createObject(mgr, {
-                    "baseUrl": b.endpoint, "http": mgr.http })
+                    "baseUrl": b.endpoint, "http": mgr.http,
+                    "keyring": mgr.keyring, "keyRef": b.keyRef || "" })
             }
         }
         _extraClients = cur

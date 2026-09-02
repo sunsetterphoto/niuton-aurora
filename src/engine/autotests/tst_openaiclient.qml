@@ -10,15 +10,38 @@ TestCase {
     QtObject {
         id: mockHttp
         property var calls: []
-        function getJson(url, cb, timeoutMs) {
-            calls.push({ "method": "get", "url": url, "cb": cb })
+        function getJson(url, cb, timeoutMs, headers) {
+            calls.push({ "method": "get", "url": url, "cb": cb, "headers": headers })
         }
-        function postJson(url, body, cb, timeoutMs) {
+        function postJson(url, body, cb, timeoutMs, headers) {
             calls.push({ "method": "post", "url": url, "body": body,
-                         "cb": cb, "timeout": timeoutMs })
+                         "cb": cb, "timeout": timeoutMs, "headers": headers })
         }
         function answer(i, result) { if (calls[i].cb) calls[i].cb(result) }
         function last() { return calls[calls.length - 1] }
+    }
+
+    // Fake für die KeyRing-Primitive: liefert synchron einen Schlüssel und
+    // protokolliert die Anfragen (Auth-Tests dürfen nie das echte KWallet
+    // oder die Session berühren).
+    QtObject {
+        id: mockKeyring
+        property var reads: []
+        property string secret: "sk-test"
+        function readSecret(keyRef, cb) {
+            reads.push(keyRef)
+            cb({ "ok": true, "secret": mockKeyring.secret })
+        }
+    }
+
+    // Variante, die fehlschlägt (Wallet zu / abgelehnt)
+    QtObject {
+        id: brokenKeyring
+        property var reads: []
+        function readSecret(keyRef, cb) {
+            reads.push(keyRef)
+            cb({ "ok": false, "error": "Wallet zu" })
+        }
     }
 
     Component {
@@ -30,8 +53,9 @@ TestCase {
             property bool sse: false
             property string postedUrl: ""
             property var postedBody: null
+            property var postedHeaders: null
             property bool aborted: false
-            function post(url, body) { postedUrl = url; postedBody = body }
+            function post(url, body, headers) { postedUrl = url; postedBody = body; postedHeaders = headers }
             function abort() { aborted = true }
         }
     }
@@ -41,6 +65,7 @@ TestCase {
         baseUrl: "http://test:8080"
         http: mockHttp
         sseFactory: mockStreamFactory
+        keyring: mockKeyring
     }
 
     property var log: []
@@ -55,6 +80,74 @@ TestCase {
     function init() {
         mockHttp.calls = []
         log = []
+        mockKeyring.reads = []
+        mockKeyring.secret = "sk-test"
+        client.keyRef = ""          // Tests isolieren: kein Zustand übernehmen
+        client.keyring = mockKeyring
+    }
+
+    // ---------- Auth (OpenRouter: Cloud-Backend braucht einen Key) ----------
+
+    // Ohne keyRef darf kein Authorization-Header entstehen und die KeyRing-
+    // Primitive gar nicht erst gefragt werden — llama-server lokal braucht nichts.
+    function test_ohneKeyRefKeinAuthHeader() {
+        client.refreshModels()
+        verify(!(mockHttp.calls[0].headers && mockHttp.calls[0].headers["Authorization"]))
+        compare(mockKeyring.reads.length, 0)
+    }
+
+    // Mit keyRef: der Schlüssel wird genau einmal aufgelöst, alle Requests
+    // tragen ihn als Bearer-Header.
+    function test_mitKeyRefAuthHeaderBeiModellen() {
+        client.keyRef = "openrouter"
+        client.refreshModels()
+        var c = mockHttp.calls[0]
+        compare(c.headers["Authorization"], "Bearer sk-test")
+        compare(mockKeyring.reads.length, 1)
+        compare(mockKeyring.reads[0], "openrouter")
+
+        // Schlüssel bleibt gecacht: zweiter Request ohne weiteren readSecret.
+        client.refreshModels()
+        compare(mockKeyring.reads.length, 1)
+        compare(mockHttp.calls[1].headers["Authorization"], "Bearer sk-test")
+    }
+
+    // Chat streamt über NdjsonStream — auch dort muss der Header hin.
+    function test_authHeaderImChatStream() {
+        client.keyRef = "openrouter"
+        var job = client.chat({ "model": "m", "messages": [] })
+        var s = job._stream
+        compare(s.postedHeaders["Authorization"], "Bearer sk-test")
+        job.destroy()
+    }
+
+    function test_authHeaderBeiEmbed() {
+        client.keyRef = "openrouter"
+        client.embed("nomic", "hallo", function(v) {})
+        compare(mockHttp.last().headers["Authorization"], "Bearer sk-test")
+    }
+
+    // Abwesenheit des Keys ist kein Fehler, aber auch kein Empty-Bearer:
+    // einfach ohne Header arbeiten (Server meldet dann 401 — ehrlich).
+    function test_leererSchluesselKeinHeader() {
+        client.keyRef = "openrouter"
+        mockKeyring.secret = ""
+        client.refreshModels()
+        verify(!(mockHttp.calls[0].headers && mockHttp.calls[0].headers["Authorization"]))
+    }
+
+    // Fehlschlag der KeyRing-Primitive (Wallet zu): wie leerer Schlüssel,
+    // nur dass ein weiterer Versuch erneut fragt.
+    function test_schluesselFehlerKeinHeader() {
+        client.keyring = brokenKeyring
+        client.keyRef = "openrouter"
+        client.refreshModels()
+        verify(!(mockHttp.calls[0].headers && mockHttp.calls[0].headers["Authorization"]))
+        compare(brokenKeyring.reads.length, 1)
+        // Nächster Request versucht es erneut (Fehler wird nicht gecacht)
+        client.refreshModels()
+        compare(brokenKeyring.reads.length, 2)
+        client.keyring = mockKeyring
     }
 
     // ---------- Modelle ----------

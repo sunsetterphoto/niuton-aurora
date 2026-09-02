@@ -185,6 +185,26 @@ TestCase {
         compare(client.models[0].digest, "")
     }
 
+    // Kontextlänge und Bild-Ausgabe-Fähigkeit kommen aus den Metadaten der
+    // Modellliste (context_length, architecture.output_modalities) — der Picker
+    // zeigt die Kontextlänge, die Bildausgabe steuert die modalities-Anfrage.
+    function test_modelsTragenKontextUndBildAusgabe() {
+        client.refreshModels()
+        mockHttp.answer(0, { "ok": true, "data": { "data": [
+            { "id": "textmodell", "context_length": 262144,
+              "architecture": { "output_modalities": ["text"] } },
+            { "id": "bildmodell", "context_length": 32768,
+              "architecture": { "output_modalities": ["text", "image"] } },
+            { "id": "ohnemetadata" }
+        ] } })
+        compare(client.models[0].contextLength, 262144)
+        compare(client.models[0].imageOutput, false)
+        compare(client.models[1].contextLength, 32768)
+        compare(client.models[1].imageOutput, true)
+        compare(client.models[2].contextLength, 0)   // fehlend = 0
+        compare(client.models[2].imageOutput, false)
+    }
+
     // ---------- Capabilities ----------
 
     // OpenAI-Server haben kein /api/show. Statt zu raten liefert der Client
@@ -344,7 +364,57 @@ TestCase {
         job.destroy()
     }
 
-    // ---------- Embeddings ----------
+    // ---------- Eingabe-Modalitäten (Phase 4) ----------
+
+    // Ollama-Format: message.images als rohe Base64-Liste. OpenAI erwartet ein
+    // content-Array mit image_url-Teilen. Das Mapping gehört hierher (Backend-
+    // Sache), nicht in den ChatController.
+    function test_bilderWerdenZuOpenAiContentTeilen() {
+        var original = [{ "role": "user", "content": "Beschreibe das",
+                          "images": ["QUJD", "REVG"] }]
+        var job = client.chat({ "model": "m", "messages": original })
+        var b = job._stream.postedBody
+        var parts = b.messages[0].content
+        compare(parts.length, 3)
+        compare(parts[0].type, "text")
+        compare(parts[0].text, "Beschreibe das")
+        compare(parts[1].type, "image_url")
+        compare(parts[1].image_url.url, "data:image/png;base64,QUJD")
+        compare(parts[2].image_url.url, "data:image/png;base64,REVG")
+        compare(b.messages[0].role, "user")
+        // Das Original darf nicht mutiert werden (der ChatController nutzt
+        // dieselbe History weiter im Ollama-Format).
+        compare(typeof original[0].content, "string")
+        compare(original[0].images.length, 2)
+        job.destroy()
+    }
+
+    // Nachrichten ohne Bilder gehen unverändert durch (kein content-Array).
+    function test_nachrichtenOhneBilderUnveraendert() {
+        var job = client.chat({ "model": "m", "messages": [
+            { "role": "system", "content": "sys" },
+            { "role": "user", "content": "hi" },
+            { "role": "assistant", "content": "hallo" }
+        ] })
+        var b = job._stream.postedBody
+        compare(b.messages[0].content, "sys")
+        compare(b.messages[1].content, "hi")
+        compare(b.messages[2].content, "hallo")
+        job.destroy()
+    }
+
+    // Bereits umgewandelte Nachrichten (content ist schon ein Array) nicht
+    // doppelt verpacken.
+    function test_contentArrayBleibtUnangetastet() {
+        var parts = [{ "type": "text", "text": "x" }]
+        var job = client.chat({ "model": "m", "messages": [
+            { "role": "user", "content": parts }] })
+        compare(job._stream.postedBody.messages[0].content.length, 1)
+        compare(job._stream.postedBody.messages[0].content[0].text, "x")
+        job.destroy()
+    }
+
+// ---------- Embeddings ----------
 
     function test_embedLiestErstenVektor() {
         var vec = null

@@ -574,6 +574,80 @@ TestCase {
         verify(!bezahltGefunden)
     }
 
+    // Favoriten (Config: openrouterFavorites) überschreiben das Startset:
+    // nur gepinnte Modelle erscheinen — auch freie ohne Pin nicht.
+    function test_pickerFavoritenUeberschreibenStartset() {
+        ConfigStore.setValue("openrouterFavorites", JSON.stringify(["openrouter/free"]))
+        mgr.keyring = mockKeyring
+        ConfigStore.setValue("openrouterEnabled", true)
+        mgr.refresh()
+        var i = mockHttp.find("openrouter.ai/api/v1/models")
+        verify(i !== -1)
+        mockHttp.answer(i, { "ok": true, "data": { "data": [
+            { "id": "openrouter/free" },
+            { "id": "z-ai/glm-5.2:free" }   // im Startset, aber nicht gepinnt
+        ] } })
+        var gepinnt = false
+        var ohnePin = false
+        for (var k = 0; k < mgr.pickerEntries.length; k++) {
+            if (mgr.pickerEntries[k].value === "openrouter:openrouter/free") gepinnt = true
+            if (mgr.pickerEntries[k].value === "openrouter:z-ai/glm-5.2:free") ohnePin = true
+        }
+        verify(gepinnt)
+        verify(!ohnePin)
+        verify(mgr.settings.openrouterFavorites.length === 1)
+    }
+
+    // Suche (cloudSearch) zeigt ALLE Treffer aus der API-Liste, nicht nur
+    // Favoriten — so findet man jedes der 425 Modelle.
+    function test_pickerCloudSucheZeigtAlleTreffer() {
+        ConfigStore.setValue("openrouterFavorites", "[]")
+        mgr.keyring = mockKeyring
+        ConfigStore.setValue("openrouterEnabled", true)
+        mgr.refresh()
+        var i = mockHttp.find("openrouter.ai/api/v1/models")
+        verify(i !== -1)
+        mockHttp.answer(i, { "ok": true, "data": { "data": [
+            { "id": "openrouter/free" },
+            { "id": "openai/gpt-4o", "context_length": 128000 },
+            { "id": "openai/gpt-4.1" }
+        ] } })
+        mgr.cloudSearch = "gpt-4"
+        var treffer = 0
+        for (var k = 0; k < mgr.pickerEntries.length; k++) {
+            if (mgr.pickerEntries[k].value.indexOf("openrouter:openai/gpt") !== -1) treffer++
+        }
+        compare(treffer, 2)   // gpt-4o + gpt-4.1, aber NICHT openrouter/free
+        mgr.cloudSearch = ""
+    }
+
+    // Kontextlänge aus /v1/models im Picker-Label (nur wenn bekannt).
+    function test_pickerCloudZeigtKontextlaenge() {
+        mgr.keyring = mockKeyring
+        ConfigStore.setValue("openrouterEnabled", true)
+        mgr.refresh()
+        var i = mockHttp.find("openrouter.ai/api/v1/models")
+        verify(i !== -1)
+        mockHttp.answer(i, { "ok": true, "data": { "data": [
+            { "id": "openrouter/free", "context_length": 200000 },
+            { "id": "openai/gpt-4o" }   // ohne Metadaten: kein Suffix
+        ] } })
+        // Suche aktiviert beide (unabhängig vom Startset)
+        mgr.cloudSearch = "free"
+        var label1 = ""
+        for (var k = 0; k < mgr.pickerEntries.length; k++)
+            if (mgr.pickerEntries[k].value === "openrouter:openrouter/free")
+                label1 = mgr.pickerEntries[k].label
+        verify(label1.indexOf("200K") !== -1, label1)
+        mgr.cloudSearch = "gpt-4o"
+        var label2 = ""
+        for (var k2 = 0; k2 < mgr.pickerEntries.length; k2++)
+            if (mgr.pickerEntries[k2].value === "openrouter:openai/gpt-4o")
+                label2 = mgr.pickerEntries[k2].label
+        compare(label2, "openai/gpt-4o")   // kein Kontextsuffix ohne Metadaten
+        mgr.cloudSearch = ""
+    }
+
     // Bestandsauswahl "remote:<modell>" muss weiter funktionieren: sie zeigt
     // auf das erste Netzwerk-Backend. refreshModels braucht neben der Probe
     // den zweiten /api/tags- und den /api/ps-Aufruf, bevor models steht —

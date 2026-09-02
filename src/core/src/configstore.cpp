@@ -50,6 +50,9 @@ const QVariantMap &ConfigStore::defaults()
         { QStringLiteral("openaiEndpoint"),         QString() },
         // Einziges Backend, das Daten aus dem Haus gibt — daher opt-in.
         { QStringLiteral("openrouterEnabled"),      false },
+        // Vom Nutzer gepinnte Cloud-Modelle (JSON-Array der IDs). Leer = die
+        // Engine fällt auf das freie Startset zurück (OpenRouterFreeStart).
+        { QStringLiteral("openrouterFavorites"),    QStringLiteral("[]") },
         { QStringLiteral("embedModel"),             QStringLiteral("nomic-embed-text") },
         { QStringLiteral("ragEnabled"),             true },
         { QStringLiteral("ragTopK"),                3 },

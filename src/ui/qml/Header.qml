@@ -33,6 +33,7 @@ RowLayout {
     signal toggleSidebar()
     signal newChatRequested()
     signal modelSelected(string value)
+    signal cloudSearchChanged(string text)   // Suchtext im Picker (Cloud-Filter)
     signal thinkingToggled(bool on)
     signal autoSpeakToggled(bool on)
     signal pinToggled(bool on)
@@ -132,51 +133,78 @@ RowLayout {
         }
     }
 
-    // Model selector (gruppiert: Auto / Lokal / Remote)
-    // currentIndex wird imperativ synchronisiert statt deklarativ gebunden:
-    // QQC2.ComboBox schreibt currentIndex bei User-Aktivierung selbst imperativ,
-    // was eine deklarative Bindung dauerhaft bricht — danach folgt sie externen
-    // selectedModel-Änderungen (Auto-Wechsel, loadConversation) nicht mehr.
-    function _syncCurrentIndex() {
-        for (var i = 0; i < header.pickerEntries.length; i++) {
-            if (header.pickerEntries[i].value === header.selectedModel) {
-                modelSelector.currentIndex = i
-                return
-            }
-        }
-        modelSelector.currentIndex = 0
-    }
-    onSelectedModelChanged: _syncCurrentIndex()
-    onPickerEntriesChanged: _syncCurrentIndex()
+    // Model selector: Button + Popup statt ComboBox. Die Cloud-Gruppe kann
+    // hunderte Einträge tragen (OpenRouter) — ein ComboBox-Popup hätte weder
+    // Suche noch Virtualisierung. Die Suche wird VOM POPUP gelebt: beim Öffnen
+    // leer (zeigt Favoriten), beim Tippen cloudSearchChanged, beim Schließen
+    // zurückgesetzt — sonst bliebe ein Suchfilter stehen.
+    // (_picker*-Properties: Test-Hooks, damit tst_header die Elemente erreicht;
+    // ids allein sind außerhalb des Objekts nicht auflösbar.)
+    property var _pickerButton: pickerButton
+    property var _pickerPopup: pickerPopup
+    property var _searchField: searchField
+    property var _pickerList: pickerList
 
-    QQC2.ComboBox {
-        id: modelSelector
+    QQC2.Button {
+        id: pickerButton
         Layout.preferredWidth: Kirigami.Units.gridUnit * 10
-        model: header.pickerEntries
-        displayText: header.selectedModel === "auto"
+        text: header.selectedModel === "auto"
             ? "Auto · " + header.activeModel
             : (header.isRemoteModel ? "🌐 " : "") + header.activeModel
-        Component.onCompleted: header._syncCurrentIndex()
-        delegate: QQC2.ItemDelegate {
-            required property var modelData
-            required property int index
-            width: modelSelector.width
-            enabled: modelData.kind !== "header" && modelData.enabled !== false
-            highlighted: modelSelector.highlightedIndex === index
-            contentItem: QQC2.Label {
-                text: modelData.label
-                font.bold: modelData.kind === "header"
-                font.pointSize: modelData.kind === "header"
-                    ? Kirigami.Theme.smallFont.pointSize
-                    : Kirigami.Theme.defaultFont.pointSize
-                opacity: modelData.kind === "header" ? 0.6 : 1.0
-                elide: Text.ElideRight
+        onClicked: pickerPopup.open()
+    }
+
+    QQC2.Popup {
+        id: pickerPopup
+        width: Kirigami.Units.gridUnit * 16
+        height: Math.min(Kirigami.Units.gridUnit * 2 + 320, Kirigami.Units.gridUnit * 26)
+        closePolicy: QQC2.Popup.CloseOnEscape | QQC2.Popup.CloseOnPressOutside
+        onOpened: searchField.text = ""
+        onClosed: searchField.text = ""   // setzt auch cloudSearchChanged("") in Gang
+
+        ColumnLayout {
+            anchors.fill: parent
+            spacing: Kirigami.Units.smallSpacing
+
+            QQC2.TextField {
+                id: searchField
+                Layout.fillWidth: true
+                Layout.margins: Kirigami.Units.smallSpacing
+                placeholderText: "Cloud-Modelle durchsuchen…"
+                onTextChanged: header.cloudSearchChanged(text)
             }
-        }
-        onActivated: function(index) {
-            var entry = header.pickerEntries[index]
-            if (entry && entry.kind !== "header" && entry.enabled !== false)
-                header.modelSelected(entry.value)
+
+            ListView {
+                id: pickerList
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                // Der Host filtert über ModelManager (cloudSearch); hier wird
+                // die gefilterte Liste nur noch angezeigt.
+                model: header.pickerEntries
+                clip: true
+                delegate: QQC2.ItemDelegate {
+                    required property var modelData
+                    required property int index
+                    width: pickerList.width
+                    enabled: modelData.kind !== "header" && modelData.enabled !== false
+                    highlighted: pickerList.highlightedIndex === index
+                    contentItem: QQC2.Label {
+                        text: modelData.label
+                        font.bold: modelData.kind === "header"
+                        font.pointSize: modelData.kind === "header"
+                            ? Kirigami.Theme.smallFont.pointSize
+                            : Kirigami.Theme.defaultFont.pointSize
+                        opacity: modelData.kind === "header" ? 0.6 : 1.0
+                        elide: Text.ElideRight
+                    }
+                    onClicked: {
+                        if (modelData.kind !== "header" && modelData.enabled !== false) {
+                            pickerPopup.close()
+                            header.modelSelected(modelData.value)
+                        }
+                    }
+                }
+            }
         }
     }
 

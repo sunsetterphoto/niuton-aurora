@@ -53,6 +53,7 @@ ColumnLayout {
         onToggleSidebar: root._sidebarOpen = !root._sidebarOpen
         onNewChatRequested: root.controller.newConversation()
         onModelSelected: function(value) { root.controller.selectModel(value) }
+        onCloudSearchChanged: function(text) { root.controller.setCloudSearch(text) }
         onThinkingToggled: function(on) { root.controller.setThinking(on) }
         onAutoSpeakToggled: function(on) { root.controller.setAutoSpeak(on) }
         onPinToggled: function(on) { root.pinToggled(on) }

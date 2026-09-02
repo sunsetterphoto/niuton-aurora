@@ -48,6 +48,10 @@ QtObject {
     // Zustand (UI liest)
     property string selectedModel: "auto"  // "auto" | "<backendId>:<n>" | "remote:<n>"
     property string activeModel: ""
+    // Suchtext für die Cloud-Gruppe (Header-Picker): nichtleer zeigt ALLE
+    // Treffer aus der API-Liste statt der Favoriten — so findet man jedes
+    // der 425 OpenRouter-Modelle.
+    property string cloudSearch: ""
     // Welches Backend bedient activeModel. "local" = der lokale Ollama.
     property string activeBackendId: "local"
     // isRemote heißt weiterhin "nicht der lokale Ollama" — davon hängen
@@ -125,10 +129,14 @@ QtObject {
         // Weitere Backends in Registry-Reihenfolge. Ohne Größenangabe: die
         // OpenAI-API kennt weder Dateigröße noch Ladezustand. Cloud-Backends
         // tragen die Wolke im Gruppentitel — wer Daten aus dem Haus gibt, soll
-        // das im Picker sehen. OpenRouter zeigt außerdem NUR das freie
-        // Startset (21 Modelle): die API liefert 425 Einträge, eine flache
-        // Liste wäre unbenutzbar. Fällt das Startset leer aus (API-Wechsel),
-        // bleiben alle sichtbar, damit nichts verschwindet.
+        // das im Picker sehen.
+        //
+        // Cloud-Filterung (OpenRouter, 425 Modelle): ohne Suchtext erscheinen
+        // nur die Favoriten (Config openrouterFavorites) bzw. — wenn keine
+        // gepinnt sind — das freie Startset. Mit Suchtext (cloudSearch) werden
+        // ALLE Treffer aus der API-Liste gezeigt. Fällt die Favoritenliste
+        // leer und das Startset aus (API-Wechsel), bleiben alle sichtbar,
+        // damit nichts verschwindet.
         for (var bi = 0; bi < backends.length; bi++) {
             var b = backends[bi]
             if (!_isExtra(b)) continue
@@ -136,19 +144,34 @@ QtObject {
             if (!c || c.models.length === 0) continue
             e.push({ "label": b.cloud ? (b.label + " ☁") : b.label,
                      "value": "", "kind": "header", "enabled": false })
+            var suchtext = mgr.cloudSearch.trim().toLowerCase()
+            var favoriten = (settings && settings.openrouterFavorites)
+                ? settings.openrouterFavorites : []
             var gezeigt = 0
             for (var mi = 0; mi < c.models.length; mi++) {
                 var cname = c.models[mi].name
-                if (b.cloud && _openRouterFreeStart
-                        && Object.keys(_openRouterFreeStart.models).length > 0
-                        && !_openRouterFreeStart.isFree(cname))
-                    continue
-                e.push({ "label": c.models[mi].name,
+                var sichtbar = true
+                if (b.cloud) {
+                    if (suchtext !== "") {
+                        // Suche: alles, was den Suchtext enthält (Groß/Klein egal)
+                        sichtbar = cname.toLowerCase().indexOf(suchtext) !== -1
+                    } else if (favoriten.length > 0) {
+                        sichtbar = favoriten.indexOf(cname) !== -1
+                    } else if (_openRouterFreeStart
+                            && Object.keys(_openRouterFreeStart.models).length > 0) {
+                        sichtbar = _openRouterFreeStart.isFree(cname)
+                    }
+                }
+                if (!sichtbar) continue
+                var label = cname
+                var ctx = c.models[mi].contextLength
+                if (b.cloud && ctx && ctx > 0) label += " · " + _fmtCtx(ctx)
+                e.push({ "label": label,
                          "value": b.id + ":" + cname,
                          "kind": b.cloud ? "cloud" : "extra", "enabled": true })
                 gezeigt++
             }
-            if (gezeigt === 0 && c.models.length > 0) {
+            if (gezeigt === 0 && c.models.length > 0 && suchtext === "") {
                 for (var mi2 = 0; mi2 < c.models.length; mi2++)
                     e.push({ "label": c.models[mi2].name,
                              "value": b.id + ":" + c.models[mi2].name,
@@ -156,6 +179,12 @@ QtObject {
             }
         }
         return e
+    }
+
+    // Kontextlänge kompakt: 200000 -> "200K", 1048576 -> "1M". Nur Anzeige.
+    function _fmtCtx(n) {
+        if (n >= 1000000) return (Math.round(n / 100000) / 10) + "M"
+        return Math.round(n / 1000) + "K"
     }
 
     function _backendById(id) {

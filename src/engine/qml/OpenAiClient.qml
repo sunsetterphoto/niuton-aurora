@@ -97,10 +97,18 @@ QtObject {
                 var list = (res.data && res.data.data) || []
                 var fresh = []
                 for (var i = 0; i < list.length; i++) {
-                    var name = list[i].id || ""
+                    var m = list[i]
+                    var name = m.id || ""
                     if (name === "" || name.indexOf("embed") !== -1) continue
+                    // Metadaten für Picker (Kontextlänge) und Bild-Ausgabe
+                    // (modalities-Anfrage): fehlen bei manchen Servern
+                    // (llama-server) — dann 0/false.
+                    var outMod = (m.architecture && m.architecture.output_modalities)
+                        ? m.architecture.output_modalities : []
                     fresh.push({ "name": name, "sizeGB": 0,
-                                 "loaded": false, "digest": "" })
+                                 "loaded": false, "digest": "",
+                                 "contextLength": m.context_length || 0,
+                                 "imageOutput": outMod.indexOf("image") !== -1 })
                 }
                 client.models = fresh
                 if (callback) callback(fresh)
@@ -134,10 +142,43 @@ QtObject {
         if (options.stop !== undefined) payload.stop = options.stop
     }
 
+    // Anhänge: Aurora transportiert sie im Ollama-Format (message.images als
+    // Base64-Liste, ohne MIME). OpenAI nimmt ein content-Array mit text- und
+    // image_url-Teilen. Mapping hier (Backend-Sache), damit der ChatController
+    // eine gemeinsame Historie für beide Welten hält. Das Original wird nie
+    // mutiert — der ChatController nutzt es weiter im Ollama-Format. MIME beim
+    // data-Prefix: Ollama kennt keins; dpng ist der von Vision-APIs am besten
+    // akzeptierte Default (die meisten Server snüffeln die Bytes).
+    function _mapMessages(messages) {
+        if (!messages) return messages
+        var out = []
+        for (var i = 0; i < messages.length; i++) {
+            var m = messages[i]
+            var imgs = m.images
+            var istString = (typeof m.content === "string")
+            if (!imgs || imgs.length === 0 || !istString) {
+                out.push(m)
+                continue
+            }
+            var parts = []
+            if (m.content !== "") parts.push({ "type": "text", "text": m.content })
+            for (var j = 0; j < imgs.length; j++)
+                parts.push({ "type": "image_url",
+                             "image_url": { "url": "data:image/png;base64," + imgs[j] } })
+            var n = {}
+            for (var k in m) {
+                if (k !== "images" && k !== "content") n[k] = m[k]
+            }
+            n.content = parts
+            out.push(n)
+        }
+        return out
+    }
+
     function chat(request) {
         var payload = {
             "model": request.model,
-            "messages": request.messages,
+            "messages": _mapMessages(request.messages),
             "stream": true
         }
         if (request.tools && request.tools.length > 0) payload.tools = request.tools

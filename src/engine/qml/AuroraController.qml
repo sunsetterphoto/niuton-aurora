@@ -47,6 +47,10 @@ QtObject {
     readonly property bool modelLoading: modelManager.modelLoading
     readonly property bool isRemoteModel: modelManager.isRemote
     readonly property var modelPickerEntries: modelManager.pickerEntries
+    // Suchtext für den Picker (Cloud-Gruppe): vom Header herein, Filter läuft
+    // im ModelManager (cloudSearch).
+    property string cloudSearch: ""
+    onCloudSearchChanged: modelManager.cloudSearch = cloudSearch
     readonly property bool localOk: modelManager.localModels.length > 0
     readonly property bool remoteOk: modelManager.remoteAvailable
 
@@ -433,6 +437,7 @@ QtObject {
 
     // ==================== Modell / Tool-Freigabe ====================
     function selectModel(value) { modelManager.selectModel(value) }
+    function setCloudSearch(text) { cloudSearch = text }
     function confirmOnce() { engine.confirmOnce() }
     function confirmForConversation() { engine.confirmForConversation() }
     function reject() { engine.reject() }

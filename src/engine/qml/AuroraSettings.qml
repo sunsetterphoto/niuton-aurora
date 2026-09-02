@@ -27,6 +27,9 @@ QtObject {
     property string modelPerformance: ConfigStore.value("modelPerformance")
     property string lastSelectedModel: ConfigStore.value("lastSelectedModel")
     property string embedModel: ConfigStore.value("embedModel")
+    // Vom Nutzer gepinnte OpenRouter-Modelle (Array der IDs). Leer = die
+    // Engine nutzt das freie Startset (OpenRouterFreeStart).
+    property var openrouterFavorites: _parseFavorites()
     property bool ragEnabled: ConfigStore.value("ragEnabled")
     property int ragTopK: ConfigStore.value("ragTopK")
     property double ragThreshold: ConfigStore.value("ragThreshold")
@@ -119,6 +122,7 @@ QtObject {
         modelPerformance = ConfigStore.value("modelPerformance")
         lastSelectedModel = ConfigStore.value("lastSelectedModel")
         embedModel = ConfigStore.value("embedModel")
+        openrouterFavorites = _parseFavorites()
         ragEnabled = ConfigStore.value("ragEnabled")
         ragTopK = ConfigStore.value("ragTopK")
         ragThreshold = ConfigStore.value("ragThreshold")
@@ -163,6 +167,17 @@ QtObject {
             return (o && typeof o === "object" && !Array.isArray(o)) ? o : ({})
         } catch (e) {
             return ({})
+        }
+    }
+
+    // Favoriten-Liste robust parsen: bei ungültigem JSON oder Nicht-Array
+    // (extern manipuliert) auf das leere Startset zurückfallen.
+    function _parseFavorites() {
+        try {
+            var raw = JSON.parse(ConfigStore.value("openrouterFavorites") || "[]")
+            return Array.isArray(raw) ? raw : []
+        } catch (e) {
+            return []
         }
     }
 

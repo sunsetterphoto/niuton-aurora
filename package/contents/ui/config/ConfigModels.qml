@@ -14,6 +14,8 @@ KCM.SimpleKCM {
     // erreichbar ist; sonst Hinweis, damit leere Dropdowns nicht wie ein
     // Defekt aussehen (analog zum Remote-/Comfy-testStatus).
     property string localStatus: ""
+    // Status des OpenRouter-Schlüssels ("leer" | "gespeichert" | Fehlermeldung)
+    property string keyStatus: ""
 
     // --- Inferenz-Status -----------------------------------------------
     // Zeigt pro erreichbarem Ollama-Backend, welche Modelle geladen sind und
@@ -28,6 +30,26 @@ KCM.SimpleKCM {
     Component.onCompleted: {
         refreshLocalModels()
         refreshInfer()
+        refreshKeyStatus()
+    }
+
+    // Vorhandenen Schlüssel nicht in das Passwortfeld schreiben — nur den
+    // Zustand anzeigen. Der echte Wert bleibt, wo er ist (KWallet/Env).
+    function refreshKeyStatus() {
+        KeyRing.readSecret("openrouter", function(res) {
+            root.keyStatus = res.ok && res.secret !== ""
+                ? (res.source === "env" ? "Schlüssel aus AURORA_OPENROUTER_KEY" : "gespeichert")
+                : "leer"
+        })
+    }
+
+    function saveOpenRouterKey() {
+        var value = openrouterKeyField.text.trim()
+        if (value === "") return
+        KeyRing.writeSecret("openrouter", value, function(res) {
+            root.keyStatus = res.ok ? "gespeichert" : ("Fehler: " + (res.error || "unbekannt"))
+            if (res.ok) openrouterKeyField.text = ""
+        })
     }
 
     function _fmtVRAM(b) { return (Math.round(b / 1e8) / 10) + " GB" }
@@ -243,6 +265,57 @@ KCM.SimpleKCM {
                 enabled: remoteEnabledBox.checked && fallbackField.text.trim() !== ""
                 onClicked: root.testRemote(fallbackField.text.trim())
             }
+        }
+
+        Kirigami.Separator {
+            Kirigami.FormData.isSection: true
+            Kirigami.FormData.label: "OpenRouter (Cloud)"
+        }
+
+        // Explizit opt-in: fremde Cloud ist die begründete Ausnahme und wird
+        // nie automatisch gewählt (Auto-Modus greift nur auf eigene Backends).
+        QQC2.CheckBox {
+            id: openrouterEnabledBox
+            Kirigami.FormData.label: "OpenRouter:"
+            text: "Aktivieren"
+            checked: (ConfigStore.revision, ConfigStore.value("openrouterEnabled"))
+            onToggled: ConfigStore.setValue("openrouterEnabled", checked)
+        }
+
+        RowLayout {
+            visible: openrouterEnabledBox.checked
+            Kirigami.FormData.label: "API-Schlüssel:"
+            QQC2.TextField {
+                id: openrouterKeyField
+                Layout.fillWidth: true
+                placeholderText: root.keyStatus === "gespeichert"
+                    ? "Schlüssel liegt im KWallet"
+                    : root.keyStatus === "leer" ? "kein Schlüssel gespeichert" : "sk-or-…"
+                echoMode: TextInput.PasswordEchoOnEdit
+            }
+            QQC2.Button {
+                text: "Speichern"
+                enabled: openrouterKeyField.text.trim() !== ""
+                onClicked: root.saveOpenRouterKey()
+            }
+        }
+
+        QQC2.Label {
+            visible: openrouterEnabledBox.checked
+            text: root.keyStatus !== ""
+                ? root.keyStatus
+                : "Der Schlüssel liegt im KWallet (nicht in der Konfigurationsdatei)."
+            wrapMode: Text.Wrap
+            opacity: 0.8
+            Layout.maximumWidth: Kirigami.Units.gridUnit * 25
+        }
+
+        QQC2.Label {
+            visible: openrouterEnabledBox.checked
+            text: "Für kopf-losen Betrieb stattdessen die Umgebungsvariable AURORA_OPENROUTER_KEY setzen."
+            wrapMode: Text.Wrap
+            opacity: 0.6
+            Layout.maximumWidth: Kirigami.Units.gridUnit * 25
         }
 
         Kirigami.Separator {

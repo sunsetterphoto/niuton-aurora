@@ -13,6 +13,8 @@ target_sources(auroracoreplugin PRIVATE
     src/fileio.h
     src/http.cpp
     src/http.h
+    src/keyring.cpp
+    src/keyring.h
     src/ndjsonstream.cpp
     src/ndjsonstream.h
     src/processrunner.cpp
@@ -20,7 +22,7 @@ target_sources(auroracoreplugin PRIVATE
     src/utf8trim.h
 )
 target_include_directories(auroracoreplugin PRIVATE src)
-target_link_libraries(auroracoreplugin PRIVATE Qt6::Core Qt6::Qml Qt6::Network Qt6::Sql)
+target_link_libraries(auroracoreplugin PRIVATE Qt6::Core Qt6::Qml Qt6::Network Qt6::Sql Qt6::DBus)
 
 ecm_finalize_qml_module(auroracoreplugin DESTINATION ${KDE_INSTALL_QMLDIR})
 
@@ -40,7 +42,7 @@ if(BUILD_TESTING)
     function(aurora_core_test name)
         add_executable(${name} ${ARGN})
         target_include_directories(${name} PRIVATE src autotests)
-        target_link_libraries(${name} PRIVATE Qt6::Core Qt6::Qml Qt6::Network Qt6::Sql Qt6::Test)
+        target_link_libraries(${name} PRIVATE Qt6::Core Qt6::Qml Qt6::Network Qt6::Sql Qt6::Test Qt6::DBus)
         target_compile_options(${name} PRIVATE ${AURORA_TEST_CAST_RELAX})
         add_test(NAME ${name} COMMAND ${name})
     endfunction()
@@ -51,4 +53,5 @@ if(BUILD_TESTING)
     aurora_core_test(test_processrunner autotests/test_processrunner.cpp src/processrunner.cpp)
     aurora_core_test(test_conversationstore autotests/test_conversationstore.cpp src/conversationstore.cpp)
     aurora_core_test(test_configstore autotests/test_configstore.cpp src/configstore.cpp)
+    aurora_core_test(test_keyring autotests/test_keyring.cpp src/keyring.cpp)
 endif()

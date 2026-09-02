@@ -87,7 +87,10 @@ app (`aurora`). Models and voices are fetched separately via `./setup-assets.sh`
   and do not run Aurora against the same folder from two machines at once.
 
 Configuration is stored in `~/.config/net.niuton.aurora.rc`; data (conversations, knowledge base,
-images, voices) under `~/.local/share/aurora/` unless you moved it.
+images, voices) under `~/.local/share/aurora/` unless you moved it. Secrets stay out of these
+files: the OpenRouter API key lives in the KWallet (`net.niuton.aurora` folder, accessed over the
+org.kde.kwalletd6 D-Bus API), with the `AURORA_OPENROUTER_KEY` environment variable as a
+headless fallback.
 
 ### Ports
 

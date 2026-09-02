@@ -32,14 +32,23 @@ QtObject {
         var out = []
         if (!settings)
             return out
-        // Lokal hat Vorrang: läuft hier eine Instanz, ist sie die verwaltbare.
+        // Beide Endpunkte sind eigene Einträge. Der lokale ist ein VOREIN-
+        // GESTELLTER Wert — dass er gesetzt ist, heißt nicht, dass dort etwas
+        // läuft. Die entfernte Instanz deshalb zu verschweigen (und nie zu
+        // proben) würde genau den häufigen Fall verdecken: ComfyUI läuft auf
+        // einem anderen Rechner, hier gibt es gar keine.
         var comfyLocal = settings.comfyEndpointLocal || ""
         var comfyRemote = settings.comfyEndpoint || ""
-        var comfy = comfyLocal !== "" ? comfyLocal : comfyRemote
-        if (comfy !== "")
-            out.push({ "id": "comfyui", "label": "ComfyUI (Bildgenerierung)",
-                       "endpoint": comfy, "healthPath": "/queue",
-                       "manageable": _isLocal(comfy) })
+        if (comfyLocal !== "")
+            out.push({ "id": "comfyui", "label": "ComfyUI (lokal)",
+                       "endpoint": comfyLocal, "healthPath": "/queue",
+                       "manageable": _isLocal(comfyLocal) })
+        if (comfyRemote !== "" && comfyRemote !== comfyLocal)
+            // Nie verwaltbar: die zugehörige Unit läuft auf dem anderen
+            // Rechner. Hier zählt nur, ob sie erreichbar ist.
+            out.push({ "id": "comfyui-remote", "label": "ComfyUI (anderer Rechner)",
+                       "endpoint": comfyRemote, "healthPath": "/queue",
+                       "manageable": false })
         var sp = settings.speachesEndpoint || ""
         if (sp !== "")
             out.push({ "id": "speaches", "label": "Speaches (Sprache ein/aus)",

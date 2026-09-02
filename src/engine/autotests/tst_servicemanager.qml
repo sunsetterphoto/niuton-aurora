@@ -187,11 +187,11 @@ TestCase {
     function test_entfernterDienstIstNichtVerwaltbar() {
         mockSettings.comfyEndpointLocal = ""
         mockSettings.comfyEndpoint = "http://192.168.1.10:8188"
-        compare(svc.manageableOf("comfyui"), false)
-        compare(svc.stateOf("comfyui"), "remote")
-        compare(svc.start("comfyui"), false)
-        compare(_runner("comfyui"), undefined)      // kein systemctl
-        compare(svc.stop("comfyui"), false)
+        compare(svc.manageableOf("comfyui-remote"), false)
+        compare(svc.stateOf("comfyui-remote"), "remote")
+        compare(svc.start("comfyui-remote"), false)
+        compare(_runner("comfyui-remote"), undefined)      // kein systemctl
+        compare(svc.stop("comfyui-remote"), false)
     }
 
     // Der Health-Probe läuft für entfernte Dienste weiter.
@@ -202,7 +202,7 @@ TestCase {
         var i = mockHttp.find("192.168.1.10:8188/queue")
         verify(i !== -1)
         mockHttp.answer(i, { "ok": true })
-        compare(svc.healthyOf("comfyui"), true)
+        compare(svc.healthyOf("comfyui-remote"), true)
     }
 
     // Lokal konfiguriert bleibt lokal verwaltbar (Regression).
@@ -212,13 +212,29 @@ TestCase {
         compare(_runner("comfyui").started.args.join(" "), "--user start comfyui")
     }
 
-    // Die lokale Instanz hat Vorrang, wenn beide konfiguriert sind.
-    function test_lokalVorRemote() {
+    // Sind BEIDE konfiguriert, erscheinen beide: der lokale Endpunkt ist ein
+    // Default, der nichts darüber aussagt, ob dort etwas läuft — die entfernte
+    // Instanz deshalb zu verschweigen (und nie zu proben) wäre falsch.
+    function test_lokalUndRemoteErscheinenBeide() {
         mockSettings.comfyEndpointLocal = "http://127.0.0.1:8188"
-        mockSettings.comfyEndpoint = "http://192.168.1.10:8188"
-        compare(svc.manageableOf("comfyui"), true)
+        mockSettings.comfyEndpoint = "http://192.168.1.10:8000"
+        compare(svc.manageableOf("comfyui"), true)          // lokal: startbar
+        compare(svc.manageableOf("comfyui-remote"), false)  // entfernt: nur Anzeige
+        compare(svc.stateOf("comfyui-remote"), "remote")
         svc.refresh()
         verify(mockHttp.find("127.0.0.1:8188/queue") !== -1)
+        verify(mockHttp.find("192.168.1.10:8000/queue") !== -1)
+    }
+
+    // Nur remote konfiguriert: dann gibt es keinen lokalen Eintrag, der eine
+    // Unit vorgaukelt, die es nicht gibt.
+    function test_nurRemoteZeigtKeinenLokalenEintrag() {
+        mockSettings.comfyEndpointLocal = ""
+        mockSettings.comfyEndpoint = "http://192.168.1.10:8000"
+        var ids = []
+        for (var i = 0; i < svc.services.length; i++) ids.push(svc.services[i].id)
+        compare(ids.indexOf("comfyui"), -1)
+        verify(ids.indexOf("comfyui-remote") !== -1)
     }
 
     // Fehlende Unit ist kein "Start fehlgeschlagen", sondern "nicht

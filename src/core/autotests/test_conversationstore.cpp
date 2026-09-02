@@ -1,5 +1,6 @@
 #include <QDir>
 #include <QFileInfo>
+#include <QSettings>
 #include <QSignalSpy>
 #include <QSqlDatabase>
 #include <QSqlQuery>
@@ -968,6 +969,71 @@ private Q_SLOTS:
             QCOMPARE(hits.first().toMap().value("titleMatch").toBool(), false);
         }
         qunsetenv("AURORA_DB_PATH");
+    }
+
+    // Datensouveränität heißt nicht "muss auf diesem Gerät liegen": wer eine
+    // eigene Nextcloud betreibt, soll die Datenbank dorthin legen können.
+    // Vorrang: AURORA_DB_PATH (Tests) > dataPath aus der Konfiguration > Default.
+    void dataPathAusKonfiguration_wirdVerwendet()
+    {
+        QTemporaryDir dir;
+        const QString cfgPfad = dir.filePath(QStringLiteral("aurora.rc"));
+        const QString ziel = dir.filePath(QStringLiteral("Nextcloud/Aurora"));
+        {
+            QSettings cfg(cfgPfad, QSettings::IniFormat);
+            cfg.setValue(QStringLiteral("dataPath"), ziel);
+            cfg.sync();
+        }
+        qunsetenv("AURORA_DB_PATH");
+        qputenv("AURORA_CONFIG_PATH", cfgPfad.toUtf8());
+        {
+            ConversationStore store;
+            QCOMPARE(store.dbPath(), ziel + QStringLiteral("/aurora.db"));
+            QCOMPARE(store.open().value(QStringLiteral("ok")).toBool(), true);
+            QVERIFY(QFile::exists(ziel + QStringLiteral("/aurora.db")));
+        }
+        qunsetenv("AURORA_CONFIG_PATH");
+    }
+
+    // Der Test-Override bleibt stärker, sonst wäre jede Fixture von der
+    // Konfiguration des ausführenden Nutzers abhängig.
+    void envOverride_schlaegtKonfiguration()
+    {
+        QTemporaryDir dir;
+        const QString cfgPfad = dir.filePath(QStringLiteral("aurora.rc"));
+        {
+            QSettings cfg(cfgPfad, QSettings::IniFormat);
+            cfg.setValue(QStringLiteral("dataPath"), dir.filePath(QStringLiteral("ignoriert")));
+            cfg.sync();
+        }
+        const QString envDb = dir.filePath(QStringLiteral("env.db"));
+        qputenv("AURORA_CONFIG_PATH", cfgPfad.toUtf8());
+        qputenv("AURORA_DB_PATH", envDb.toUtf8());
+        {
+            ConversationStore store;
+            QCOMPARE(store.dbPath(), envDb);
+        }
+        qunsetenv("AURORA_DB_PATH");
+        qunsetenv("AURORA_CONFIG_PATH");
+    }
+
+    // Leerer dataPath ist kein Pfad, sondern "nicht gesetzt".
+    void leererDataPath_faelltAufDefaultZurueck()
+    {
+        QTemporaryDir dir;
+        const QString cfgPfad = dir.filePath(QStringLiteral("aurora.rc"));
+        {
+            QSettings cfg(cfgPfad, QSettings::IniFormat);
+            cfg.setValue(QStringLiteral("dataPath"), QString());
+            cfg.sync();
+        }
+        qunsetenv("AURORA_DB_PATH");
+        qputenv("AURORA_CONFIG_PATH", cfgPfad.toUtf8());
+        {
+            ConversationStore store;
+            QVERIFY(store.dbPath().endsWith(QStringLiteral("/aurora/aurora.db")));
+        }
+        qunsetenv("AURORA_CONFIG_PATH");
     }
 };
 

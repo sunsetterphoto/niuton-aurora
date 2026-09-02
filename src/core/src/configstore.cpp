@@ -42,6 +42,9 @@ const QVariantMap &ConfigStore::defaults()
         { QStringLiteral("sttSource"),              QString() },
         { QStringLiteral("searchEndpoint"),         QStringLiteral("http://127.0.0.1:8888") },
         { QStringLiteral("modelParams"),            QStringLiteral("{}") },
+        // Leer = Standardpfad. Gesetzt: Ordner für aurora.db — erlaubt es,
+        // die Daten in eine selbst betriebene Cloud (Nextcloud o.ä.) zu legen.
+        { QStringLiteral("dataPath"),               QString() },
         { QStringLiteral("embedModel"),             QStringLiteral("nomic-embed-text") },
         { QStringLiteral("ragEnabled"),             true },
         { QStringLiteral("ragTopK"),                3 },

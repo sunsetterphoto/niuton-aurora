@@ -10,6 +10,7 @@
 #include <QSqlDatabase>
 #include <QSqlError>
 #include <QSqlQuery>
+#include <QSettings>
 #include <QStandardPaths>
 #include <QUuid>
 #include <QVector>
@@ -25,13 +26,37 @@ QString isoNow()
     return QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs);
 }
 
+// Vom Nutzer gewählter Datenordner (leer = nicht gesetzt). Gelesen wird
+// dieselbe INI wie im ConfigStore, aber bewusst über eigene QSettings statt
+// über eine Objekt-Abhängigkeit: der Store soll ohne laufenden ConfigStore
+// öffnen können (Worker-Thread, Tests).
+QString configuredDataPath()
+{
+    const QByteArray cfgOverride = qgetenv("AURORA_CONFIG_PATH");
+    const QString cfgPath = !cfgOverride.isEmpty()
+        ? QString::fromLocal8Bit(cfgOverride)
+        : QStandardPaths::writableLocation(QStandardPaths::GenericConfigLocation)
+              + QLatin1String("/net.niuton.aurora.rc");
+    QSettings cfg(cfgPath, QSettings::IniFormat);
+    return cfg.value(QStringLiteral("dataPath")).toString().trimmed();
+}
+
 QString resolvedDbPath()
 {
+    // Vorrang: Test-Override > Nutzerwahl > Standardpfad.
     const QByteArray override = qgetenv("AURORA_DB_PATH");
     if (!override.isEmpty())
         return QString::fromUtf8(override);
-    const QString base = QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation)
-        + QLatin1String("/aurora");
+    // Datensouveränität heißt nicht Ortsgebundenheit: wer eine eigene Cloud
+    // betreibt (Nextcloud o.ä.), legt die Datenbank in deren Sync-Ordner.
+    // Hinweis für diesen Fall: SQLite läuft hier im WAL-Modus, die Dateien
+    // -wal und -shm gehören deshalb NICHT in die Synchronisation, und Aurora
+    // sollte nicht auf zwei Geräten gleichzeitig auf denselben Ordner
+    // schreiben — sonst entstehen Sync-Konflikte statt gemeinsamer Historie.
+    QString base = configuredDataPath();
+    if (base.isEmpty())
+        base = QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation)
+            + QLatin1String("/aurora");
     QDir().mkpath(base);
     return base + QLatin1String("/aurora.db");
 }

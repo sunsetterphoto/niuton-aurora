@@ -65,6 +65,34 @@ KCM.SimpleKCM {
 
         Kirigami.Separator {
             Kirigami.FormData.isSection: true
+            Kirigami.FormData.label: "Datenablage"
+        }
+
+        QQC2.TextField {
+            Kirigami.FormData.label: "Datenordner:"
+            text: (ConfigStore.revision, ConfigStore.value("dataPath"))
+            placeholderText: "Standard: ~/.local/share/aurora"
+            onEditingFinished: ConfigStore.setValue("dataPath", text.trim())
+            QQC2.ToolTip.text: "Ordner für aurora.db (Unterhaltungen, Wissensbasis, Einbettungen). "
+                + "Leer lassen für den Standardpfad. Ein eigener Cloud-Ordner ist möglich — "
+                + "wirkt erst nach einem Neustart von Aurora."
+            QQC2.ToolTip.visible: hovered
+        }
+
+        QQC2.Label {
+            Kirigami.FormData.label: ""
+            font: Kirigami.Theme.smallFont
+            opacity: 0.7
+            wrapMode: Text.Wrap
+            Layout.maximumWidth: Kirigami.Units.gridUnit * 22
+            visible: (ConfigStore.revision, ConfigStore.value("dataPath")) !== ""
+            text: "Bei einem Sync-Ordner: aurora.db-wal und aurora.db-shm von der "
+                + "Synchronisation ausnehmen und Aurora nicht auf zwei Geräten "
+                + "gleichzeitig laufen lassen."
+        }
+
+        Kirigami.Separator {
+            Kirigami.FormData.isSection: true
             Kirigami.FormData.label: "Wissensbasis"
         }
 

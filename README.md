@@ -32,6 +32,8 @@ your own cloud storage rank equally; a third-party cloud is the deliberate excep
   (explicitly chosen, never automatic).
 - **Video generation** via OpenRouter's `/v1/videos` API (e.g. Veo 3.1 Lite, Kling) as an explicit,
   asynchronous chat tool — the finished clip appears in the chat and opens in your default player.
+- **Audio/music generation** via OpenRouter's free `lyria` models as an explicit chat tool — the
+  finished WAV is played back locally (`aplay`) and shown in the chat.
 - **Voice**: speech-to-text via whisper.cpp and text-to-speech via [Piper](https://github.com/rhasspy/piper).
 - **Conversation history** in SQLite with **full-text search** (FTS5 over titles and
   message contents, with result snippets), plus a **knowledge base with RAG**: thumbs-up rated

@@ -280,6 +280,40 @@ Item {
                     }
                 }
 
+                // Generiertes AUDIO (z.B. aus generate_audio): Klick-Box, die die WAV im
+                // Standard-Audioplayer öffnet. Kein neues Media-Framework — die
+                // Wiedergabe läuft lokal (aplay); hier nur die Anzeige.
+                Rectangle {
+                    visible: bubble.mediaPath !== "" && bubble.mediaType.indexOf("audio") !== -1
+                    width: parent.width
+                    height: Kirigami.Units.gridUnit * 3
+                    radius: Kirigami.Units.smallSpacing
+                    color: Theme.withAlpha(Kirigami.Theme.neutralTextColor, 0.1)
+
+                    RowLayout {
+                        anchors.fill: parent
+                        anchors.margins: Kirigami.Units.smallSpacing
+                        spacing: Kirigami.Units.smallSpacing
+
+                        Kirigami.Icon {
+                            source: "audio-x-generic"
+                            Layout.preferredWidth: Kirigami.Units.iconSizes.medium
+                            Layout.preferredHeight: Kirigami.Units.iconSizes.medium
+                        }
+
+                        QQC2.Label {
+                            text: "Audio abspielen"
+                            color: Kirigami.Theme.linkColor
+                            Layout.fillWidth: true
+                            elide: Text.ElideRight
+                        }
+                    }
+                    MouseArea {
+                        anchors.fill: parent
+                        onClicked: Qt.openUrlExternally("file://" + bubble.mediaPath)
+                    }
+                }
+
                 // Generiertes VIDEO: keine neue QtMultimedia-Abhängigkeit — eine
                 // Klick-Box, die die MP4 im Standard-Player öffnet (wie die
                 // Bild-Bubble per Tap). Der Inhalt bleibt lokal auf der Platte.

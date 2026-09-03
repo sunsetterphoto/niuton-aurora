@@ -64,6 +64,18 @@ TestCase {
         b.destroy()
     }
 
+    // Audio-Bubble (mediaType "audio/wav"): sichtbar, _hasBody true.
+    function test_audioBubbleZeigtAudioBox() {
+        var b = bubbleComp.createObject(null, { "mediaPath": "/a.wav", "mediaType": "audio/wav" })
+        verify(b._hasBody)
+        b.destroy()
+    }
+    function test_audioOhneMediaPathUnsichtbar() {
+        var b = bubbleComp.createObject(null, { "text": "", "mediaPath": "", "mediaType": "audio/wav" })
+        verify(!b._hasBody)
+        b.destroy()
+    }
+
     function test_bubbleMitTextHatBody() {
         var b = bubbleComp.createObject(null, { "text": "Hallo" })
         verify(b._hasBody)

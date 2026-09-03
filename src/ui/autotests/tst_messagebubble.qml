@@ -21,6 +21,8 @@ TestCase {
             msgId: ""
             rating: 0
             ragSources: "[]"
+            usageText: ""
+            effortUsed: ""
         }
     }
 
@@ -28,6 +30,18 @@ TestCase {
         var b = bubbleComp.createObject(null, { "isLast": true })
         verify(b._actionsShown)          // letzte Bubble -> Aktionen an (ohne Hover)
         b.destroy()
+    }
+
+    // Reasoning-Nachweis: Badge nur sichtbar, wenn usageText gesetzt ist
+    // (Fake-Badge vermeiden).
+    function test_reasoningBadgeNurBeiUsageText() {
+        var b1 = bubbleComp.createObject(null, { "usageText": "" })
+        verify(!b1._reasoningBadgeShown)   // leer -> kein Badge
+        b1.destroy()
+        var b2 = bubbleComp.createObject(null, { "usageText": "Reasoning: 42 Tokens", "effortUsed": "high" })
+        verify(b2._reasoningBadgeShown)
+        compare(b2._badgeText, "⚙ Reasoning: 42 Tokens · high")
+        b2.destroy()
     }
 
     function test_aeltereBubbleOhneHoverVerborgen() {

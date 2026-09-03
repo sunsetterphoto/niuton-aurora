@@ -271,6 +271,22 @@ TestCase {
         job.destroy()
     }
 
+    // Live-Fund (OpenRouter/DeepSeek V4 Flash): das Denken kommt NICHT als
+    // reasoning_content, sondern als reasoning (String) + reasoning_details.
+    // Beides muss als Thinking durchgereicht werden.
+    function test_reasoningFeldWirdZuThinking() {
+        var job = client.chat({ "model": "m", "messages": [] })
+        _connectLog(job)
+        var s = job._stream
+        s.objectReceived({ "choices": [{ "delta": { "reasoning": "Ich denke", "reasoning_details": [] } }] })
+        s.objectReceived({ "choices": [{ "delta": { "content": "Antwort." } }] })
+        s.finished(true, 200, "")
+        compare(log[0], ["thinking", "Ich denke"])
+        compare(log[2][1].thinking, "Ich denke")
+        compare(log[2][1].content, "Antwort.")
+        job.destroy()
+    }
+
     // DER Kernfall: OpenAI streamt tool_calls fragmentiert — der Name kommt im
     // ersten Delta, arguments tröpfeln als JSON-STRING nach. Der ChatController
     // erwartet Ollama-Form: ein Call mit arguments als OBJEKT.

@@ -78,9 +78,15 @@ QtObject {
         var delta = choices[0].delta
         if (!delta) return
 
-        if (delta.reasoning_content) {
-            thinkingText += delta.reasoning_content
-            thinking(delta.reasoning_content)
+        // Denktext: OpenRouter/DeepSeek V4 Flash liefern ihn als delta.reasoning
+        // (String) + reasoning_details; llama-server/ältere Modelle als
+        // reasoning_content. Beides zusammen, nie doppelt.
+        var denktext = ""
+        if (delta.reasoning_content) denktext = delta.reasoning_content
+        else if (delta.reasoning) denktext = String(delta.reasoning)
+        if (denktext !== "") {
+            thinkingText += denktext
+            thinking(denktext)
         }
         if (delta.content) {
             content += delta.content

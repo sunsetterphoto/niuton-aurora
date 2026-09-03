@@ -430,6 +430,31 @@ TestCase {
         job.destroy()
     }
 
+    // Audio-Anhang (Ollama-Format: message.audio als base64) -> OpenAI
+    // input_audio-Part (verifiziert live am 2026-09-02).
+    function test_audioWerdenZuOpenAiInputAudio() {
+        var original = { "role": "user", "content": "Was hörst du?",
+                         "audio": "QUJD" }
+        var job = client.chat({ "model": "m", "messages": [original] })
+        var parts = job._stream.postedBody.messages[0].content
+        compare(parts.length, 2)
+        compare(parts[0].type, "text")
+        compare(parts[0].text, "Was hörst du?")
+        compare(parts[1].type, "input_audio")
+        compare(parts[1].input_audio.data, "QUJD")
+        compare(parts[1].input_audio.format, "wav")
+        // Original nicht mutiert
+        compare(typeof original.content, "string")
+        compare(original.audio, "QUJD")
+        job.destroy()
+    }
+    function test_nachrichtOhneAudioUnveraendert() {
+        var job = client.chat({ "model": "m", "messages": [
+            { "role": "user", "content": "hi" }] })
+        compare(job._stream.postedBody.messages[0].content, "hi")
+        job.destroy()
+    }
+
 // ---------- Kosten & Usage (Phase 5) ----------
 
     // Der letzte Stream-Chunk trägt usage (leere choices) und die Antwort-Id.

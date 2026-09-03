@@ -26,7 +26,8 @@ your own cloud storage rank equally; a third-party cloud is the deliberate excep
 - **Markdown rendering with syntax-highlighted code blocks** (Kate engine via
   `org.kde.syntaxhighlighting`, follows the light/dark color scheme).
 - **File attachments** via file dialog or drag & drop onto the chat — images go to
-  vision-capable models, text files are inlined into the message.
+  vision-capable models, text files are inlined into the message, and audio files (WAV/MP3/…)
+  reach audio-input models (transcription/analysis) when one is active.
 - **Image generation** via [ComfyUI](https://github.com/comfyanonymous/ComfyUI) (semantic workflow
   templates), from a chat tool or a dedicated image panel; optionally an OpenRouter image model
   (explicitly chosen, never automatic).

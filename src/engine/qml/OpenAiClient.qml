@@ -149,25 +149,35 @@ QtObject {
     // mutiert — der ChatController nutzt es weiter im Ollama-Format. MIME beim
     // data-Prefix: Ollama kennt keins; dpng ist der von Vision-APIs am besten
     // akzeptierte Default (die meisten Server snüffeln die Bytes).
+    //
+    // Audio-Anhang: message.audio (base64, wav) -> input_audio-Part. Format
+    // live gegen die API verifiziert (2026-09, freies nemotron-nano-omni).
     function _mapMessages(messages) {
         if (!messages) return messages
         var out = []
         for (var i = 0; i < messages.length; i++) {
             var m = messages[i]
             var imgs = m.images
+            var audio = m.audio
             var istString = (typeof m.content === "string")
-            if (!imgs || imgs.length === 0 || !istString) {
+            var isMulti = (imgs && imgs.length > 0 || audio) && istString
+            if (!isMulti) {
                 out.push(m)
                 continue
             }
             var parts = []
             if (m.content !== "") parts.push({ "type": "text", "text": m.content })
-            for (var j = 0; j < imgs.length; j++)
-                parts.push({ "type": "image_url",
-                             "image_url": { "url": "data:image/png;base64," + imgs[j] } })
+            if (imgs) {
+                for (var j = 0; j < imgs.length; j++)
+                    parts.push({ "type": "image_url",
+                                 "image_url": { "url": "data:image/png;base64," + imgs[j] } })
+            }
+            if (audio)
+                parts.push({ "type": "input_audio",
+                             "input_audio": { "data": audio, "format": "wav" } })
             var n = {}
             for (var k in m) {
-                if (k !== "images" && k !== "content") n[k] = m[k]
+                if (k !== "images" && k !== "content" && k !== "audio") n[k] = m[k]
             }
             n.content = parts
             out.push(n)

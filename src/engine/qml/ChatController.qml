@@ -377,12 +377,15 @@ QtObject {
         // newConversation()/loadConversation() (Task 5).
         // User-Nachricht: ListModel + Verlauf + DB
         var imgPath = (extra && extra.imagePath) ? extra.imagePath : ""
+        var audPath = (extra && extra.audioPath) ? extra.audioPath : ""
         _appendRow({ text: (extra && extra.displayText) ? extra.displayText : text,
-                     isUser: true, ts: _nowTs(), mediaPath: imgPath,
-                     mediaType: imgPath ? "image" : "" })
+                     isUser: true, ts: _nowTs(),
+                     mediaPath: imgPath || audPath,
+                     mediaType: imgPath ? "image" : (audPath ? "audio/wav" : "") })
         var userIdx = chatModel.count - 1
         var userHist = { "role": "user", "content": text }
         if (extra && extra.images) userHist.images = extra.images
+        if (extra && extra.audio) userHist.audio = extra.audio
         _messages.push(userHist)
         var userMsg = { "role": "user", "content": text }
         if (imgPath) userMsg.extra = { "attachments": [ { "path": imgPath, "mime": "" } ] }
@@ -911,6 +914,10 @@ QtObject {
             // In-Session: die base64-Bytes liegen noch im _messages-Eintrag.
             extra = { displayText: lastUserDisplayText || lastUser.content, images: lastUser.images }
             if (lastUserMediaPath) extra.imagePath = lastUserMediaPath
+        } else if (lastUser.audio) {
+            // Audio wie Bild: base64 aus dem _messages-Eintrag (In-Session).
+            extra = { displayText: lastUserDisplayText || lastUser.content, audio: lastUser.audio }
+            if (lastUserMediaPath) extra.audioPath = lastUserMediaPath
         } else if (lastUserMediaPath) {
             // Nach Reload trägt _messages KEINE images (base64 wird nie persistiert,
             // CLAUDE.md), aber der Bildpfad ist aus der DB wiederhergestellt. Die Bytes
@@ -920,7 +927,11 @@ QtObject {
             // vor dem Fix. Ist die Datei weg oder FileIO nicht verfügbar, ehrlich als
             // Text-only OHNE Thumbnail regenerieren (extra bleibt null, kein imagePath).
             var b64 = ctl.fileio ? ctl.fileio.readBase64(lastUserMediaPath) : { "ok": false }
-            if (b64 && b64.ok)
+            // Audio-Pfad (wav) als Audio wiederherstellen
+            if (b64 && b64.ok && /\.(wav)$/i.test(lastUserMediaPath))
+                extra = { displayText: lastUserDisplayText || lastUser.content,
+                          audio: b64.data, audioPath: lastUserMediaPath }
+            else if (b64 && b64.ok)
                 extra = { displayText: lastUserDisplayText || lastUser.content,
                           images: [b64.data], imagePath: lastUserMediaPath }
         }

@@ -81,6 +81,16 @@ Item {
             compare(storeMock.appended[0].role, "user")
         }
 
+        // Audio-Anhang: landet als userHist.audio in _messages (für den
+        // OpenAI-Client) und die Bubble zeigt die WAV als Audio-Box.
+        function test_sendMitAudioAnhang() {
+            ctl.send("Was hörst du?", { "audio": "QUJD", "audioPath": "/a.wav" })
+            var last = ctl._messages[ctl._messages.length - 1]
+            compare(last.audio, "QUJD")
+            compare(ctl.chatModel.get(0).mediaType, "audio/wav")
+            compare(ctl.chatModel.get(0).mediaPath, "/a.wav")
+        }
+
         function test_tokensAccumulateIntoPlaceholder() {
             ctl.send("Hi", null)
             lastJob.token("Hal")

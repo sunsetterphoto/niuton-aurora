@@ -457,6 +457,7 @@ QtObject {
             var pathStr = FileIO.urlToPath(attachedFileUrl.toString())
             var name = attachedFileName
             var isImage = /\.(png|jpe?g|webp|bmp)$/i.test(pathStr)
+            var isAudio = /\.(wav|mp3|ogg|flac)$/i.test(pathStr)
             attachedFileUrl = ""; attachedFileName = ""
             if (isImage) {
                 // Vision-Fähigkeit auf FRISCH geholten Caps entscheiden (Callback-Argument),
@@ -475,6 +476,20 @@ QtObject {
                     }
                     engine.send(text, { images: [b64.data], imagePath: pathStr, displayText: text })
                 })
+            } else if (isAudio) {
+                // Audio-Anhang (Transkription/Analyse): base64 auflösen und als
+                // audio-extra senden — der OpenAiClient mappt es zu input_audio.
+                // Kein Capability-Flag beim Ollama-Client (der kennt kein audio);
+                // der OpenAiClient entscheidet anhand des aktiven Modells.
+                var ab64 = FileIO.readBase64(pathStr)
+                if (!ab64.ok) {
+                    engine.send(text + "\n\n(Hinweis: Audio '" + name + "' konnte nicht gelesen werden.)",
+                                { displayText: text + "  📎 " + name })
+                } else {
+                    modelManager.withActiveCaps(function() {
+                        engine.send(text, { audio: ab64.data, audioPath: pathStr, displayText: text })
+                    })
+                }
             } else {
                 var fc = FileIO.readText(pathStr, 65536)
                 var full = text + "\n\n--- Anhang: " + name + " ---\n" + (fc.ok ? fc.text : "(Datei konnte nicht gelesen werden)") + "\n--- Ende ---"

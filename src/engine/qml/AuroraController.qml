@@ -75,6 +75,11 @@ QtObject {
 
     // ==================== Read-Write: UI/Feature-State ====================
     property bool thinkingEnabled: false
+    // Globaler Reasoning-Effort-Default (Header-Dropdown). Leer = Modell-Default.
+    property string reasoningEffort: ""
+    // Header zeigt Effort nur, wenn das aktive Modell Effort unterstützt.
+    readonly property var effortChoices: modelManager ? modelManager.activeEfforts() : []
+    readonly property bool effortAvailable: effortChoices.length > 0
     property bool imageMode: false
 
     // ==================== Konversationsliste (Sidebar-Modell) ====================
@@ -112,6 +117,7 @@ QtObject {
         comfy: comfyClient
         homeDir: FileIO.standardPath("home")
         thinkingEnabled: controller.thinkingEnabled
+        reasoningEffort: controller.reasoningEffort
         chatFn: function(req) { return modelManager.chat(req) }
         // Explizite Bildausgabe über ein OpenRouter-Bildmodell: der Weg ist
         // dem ComfyUI-Pfad nachempfunden (Ausgabe in dieselbe Chat-Blase über
@@ -686,6 +692,7 @@ QtObject {
     function stopSpeaking() { speaker.stop() }
     function toggleVoice() { voiceRecorder.toggle() }
     function setThinking(on) { thinkingEnabled = on }
+    function setReasoningEffort(eff) { reasoningEffort = eff }
     function modelParamsFor(name) { return settings.paramsFor(name) }
     function setModelParams(name, obj) { settings.setModelParams(name, obj) }
     function rateMessage(msgId, rating) { engine.rateMessage(msgId, rating) }

@@ -28,12 +28,18 @@ RowLayout {
     property bool showConfigure: true
     property bool showAppLauncher: true   // App selbst blendet den Absprung aus
     property bool showTune: true
+    // Reasoning-Effort (global): Auswahl -> effortSelected(text)
+    property string effortValue: ""        // aktueller Wert (für Anzeige)
+    property bool effortAvailable: false   // aktives Modell unterstützt Effort
+    // Optionen (vom Host geliefert: Modell-Fähigkeiten bzw. Standardwerte)
+    property var effortModel: ["minimal", "low", "medium", "high", "xhigh", "max"]
 
     // Aktionen
     signal toggleSidebar()
     signal newChatRequested()
     signal modelSelected(string value)
     signal cloudSearchChanged(string text)   // Suchtext im Picker (Cloud-Filter)
+    signal effortSelected(string level)
     signal thinkingToggled(bool on)
     signal autoSpeakToggled(bool on)
     signal pinToggled(bool on)
@@ -218,7 +224,12 @@ RowLayout {
     }
 
     // Thinking toggle
+    property var _effortCombo: effortCombo
+    property var _effortComboBox: effortComboBox
+    property var _thinkToggle: thinkToggle
+
     QQC2.ToolButton {
+        id: thinkToggle
         checked: header.thinkingEnabled
         checkable: true
         onToggled: header.thinkingToggled(checked)
@@ -251,6 +262,43 @@ RowLayout {
         onToggled: header.autoSpeakToggled(checked)
         QQC2.ToolTip {
             text: header.autoSpeakEnabled ? "Antworten werden vorgelesen" : "Vorlesen aus"
+            visible: parent.hovered
+            delay: Kirigami.Units.toolTipDelay
+        }
+    }
+
+    // Reasoning-Effort-Dropdown (global): nur sichtbar, wenn das aktive Modell
+    // Effort unterstützt. Auswahl -> effortSelected (Host reicht an Controller).
+    // ACHTUNG: visible wird von QQC2.ComboBox intern verwaltet (Popup-Base) und
+    // kann die deklarative Bindung nicht zuverlässig vortragen — deshalb ein
+    // Item-Container mit visible, der Combo selbst enabled-basiert einblendet.
+    Item {
+        id: effortCombo
+        visible: header.effortAvailable
+        enabled: header.effortAvailable
+        implicitWidth: effortComboBox.implicitWidth + 2
+        implicitHeight: effortComboBox.implicitHeight
+        QQC2.ComboBox {
+            id: effortComboBox
+            width: parent.width
+            model: header.effortModel
+            property int _lastIndex: -1
+            function _emitEffort() {
+                if (currentIndex < 0) return
+                var v = header.effortModel[currentIndex]
+                if (v === undefined) return
+                if (_lastIndex !== currentIndex) { _lastIndex = currentIndex; header.effortSelected(v) }
+            }
+            onActivated: _emitEffort()
+            onCurrentIndexChanged: _emitEffort()
+            Component.onCompleted: {
+                var i = header.effortModel.indexOf(header.effortValue)
+                currentIndex = (i >= 0) ? i : 0
+                _lastIndex = currentIndex
+            }
+        }
+        QQC2.ToolTip {
+            text: "Reasoning-Aufwand (globaler Default)"
             visible: parent.hovered
             delay: Kirigami.Units.toolTipDelay
         }

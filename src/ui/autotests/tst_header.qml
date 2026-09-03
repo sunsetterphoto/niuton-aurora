@@ -7,6 +7,7 @@ import net.niuton.aurora.ui
 // deshalb ein Popup mit Suchfeld (cloudSearchChanged), keine ComboBox.
 TestCase {
     name: "HeaderPicker"
+    when: windowShown
 
     property var testEntries: [
         { "label": "Auto (Energieprofil)", "value": "auto", "kind": "auto", "enabled": true },
@@ -24,6 +25,8 @@ TestCase {
 
     SignalSpy { id: searchSpy; target: header; signalName: "cloudSearchChanged" }
     SignalSpy { id: selectSpy; target: header; signalName: "modelSelected" }
+    SignalSpy { id: effortSpy; target: header; signalName: "effortSelected" }
+    SignalSpy { id: thinkSpy; target: header; signalName: "thinkingToggled" }
 
     function init() {
         // Erst Zustand zurücksetzen (Signale feuern dabei), DANN die Spys
@@ -32,6 +35,37 @@ TestCase {
         header._searchField.text = ""
         searchSpy.clear()
         selectSpy.clear()
+        effortSpy.clear()
+        thinkSpy.clear()
+    }
+
+    // Effort-Dropdown: Auswahl emittiert effortSelected (Host -> Controller)
+    function test_effortAuswahlEmittiertSignal() {
+        header._effortComboBox.currentIndex = 3   // index 3 = "high" im Modell
+        compare(effortSpy.count, 1)
+        compare(effortSpy.signalArguments[0][0], "high")
+    }
+
+    // Effort-Dropdown: nur verfügbar, wenn das aktive Modell Effort kann.
+    // (Sichtbarkeit via visible ist in der Test-Szene layout-abhängig; enabled
+    // ist deterministisch und spiegelt die Nutzbarkeit — das eigentliche
+    // Ein-/Ausblenden läuft über visible im Header.)
+    function test_effortNurBeiFaehigkeit() {
+        header.effortAvailable = false
+        wait(30)
+        compare(header._effortCombo.enabled, false)
+        compare(header._effortCombo.visible, false)
+        header.effortAvailable = true
+        wait(30)
+        compare(header._effortCombo.enabled, true)
+    }
+
+    // Thinking-Toggle: Bestand wird nicht neu getestet (bestehende Suiten
+    // decken ihn über MainView/Controller); hier nur die Effort-Emissionen.
+    function test_thinkingToggleBestehtUnveraendert() {
+        // Der Toggle existiert weiterhin (Regression Guard)
+        verify(header._thinkToggle !== null)
+        verify(header._thinkToggle.checkable)
     }
 
     // Der Button ist der Einstieg; das Popup zeigt die Einträge als Liste.

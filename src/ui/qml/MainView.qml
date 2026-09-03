@@ -39,6 +39,11 @@ ColumnLayout {
         modelLoaded: root.controller.modelLoaded
         modelLoading: root.controller.modelLoading
         thinkingEnabled: root.controller.thinkingEnabled
+        effortValue: root.controller.reasoningEffort
+        effortAvailable: root.controller.effortAvailable
+        effortModel: root.controller.effortChoices.length > 0
+            ? root.controller.effortChoices
+            : ["minimal", "low", "medium", "high", "xhigh", "max"]
         isPinned: root.isPinned
         isLoading: root.controller.busy
         ttsAvailable: root.controller.ttsAvailable
@@ -55,6 +60,7 @@ ColumnLayout {
         onModelSelected: function(value) { root.controller.selectModel(value) }
         onCloudSearchChanged: function(text) { root.controller.setCloudSearch(text) }
         onThinkingToggled: function(on) { root.controller.setThinking(on) }
+        onEffortSelected: function(level) { root.controller.setReasoningEffort(level) }
         onAutoSpeakToggled: function(on) { root.controller.setAutoSpeak(on) }
         onPinToggled: function(on) { root.pinToggled(on) }
         onMemoryRequested: root.controller.openMemory()

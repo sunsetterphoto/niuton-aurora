@@ -26,6 +26,10 @@ QtObject {
     property string homeDir: ""
     property bool thinkingEnabled: false
 
+    // Globaler Reasoning-Effort-Default (vom Header/Controller gesetzt); reicht
+    // an den ChatController durch ("", = Modell-Standard).
+    property string reasoningEffort: ""
+
     // durchgereichter Zustand (Alias muss id-verwurzelt sein -> ctlInner, NICHT die
     // Property _ctl; ein Alias auf eine Property lädt nicht)
     readonly property alias chatModel: ctlInner.chatModel
@@ -43,6 +47,7 @@ QtObject {
         store: engine.store; settings: engine.settings; registry: engine.registry
         resolver: engine.resolver; grants: engine.grants; comfy: engine.comfy
         chatFn: engine.chatFn; embedFn: engine.embedFn; homeDir: engine.homeDir; thinkingEnabled: engine.thinkingEnabled
+        reasoningEffort: engine.reasoningEffort
         imageGenFn: engine.imageGenFn
         videoGenFn: engine.videoGenFn
         audioGenFn: engine.audioGenFn

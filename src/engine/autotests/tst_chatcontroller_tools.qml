@@ -53,7 +53,8 @@ Item {
                           storeMock._n = 0; ctl.conversationId = ""; ctl._messages = []; reqLog = []
                           settingsMock.toolMaxRounds = 3
                           registryMock.perm = {}; registryMock.cat = {}; registryMock.execLog = []
-                          ctl.state = "idle"; ctl._activeJob = null; ctl.activeCaps = ["tools"] }
+                          ctl.state = "idle"; ctl._activeJob = null; ctl.activeCaps = ["tools"]
+                          ctl.thinkingEnabled = false; ctl.reasoningEffort = ""; ctl._turnReasoning = null }
 
         function test_singleAutoToolThenAnswer() {
             ctl.send("Lies Datei", null)
@@ -178,6 +179,68 @@ Item {
             verify(turn2 !== undefined && turn2 !== "")
             compare(storeMock.appended[3].turnId, turn2)
             verify(turn2 !== turn1)                            // neuer Zug -> neue turnId
+        }
+
+        // ---------- Reasoning pro Anfrage (P-B) ----------
+
+        // Grundfall: thinking-Cap aktiv + thinkingEnabled -> req.reasoning enthält
+        // enabled=true; kein Effort (leer).
+        function test_reasoningEnabledImRequest() {
+            ctl.thinkingEnabled = true
+            ctl.reasoningEffort = ""
+            ctl.activeCaps = ["tools", "thinking"]
+            ctl.send("Hi", null)
+            var req = reqLog[reqLog.length - 1]
+            verify(req.reasoning !== undefined)
+            compare(req.reasoning.enabled, true)
+            verify(req.reasoning.effort === undefined || req.reasoning.effort === "")
+            ctl.thinkingEnabled = false
+            ctl.activeCaps = ["tools"]
+        }
+
+        // Effort wird durchgereicht, wenn gesetzt (und Fähigkeit vorhanden).
+        function test_reasoningEffortImRequest() {
+            ctl.thinkingEnabled = true
+            ctl.reasoningEffort = "high"
+            ctl.activeCaps = ["tools", "thinking"]
+            ctl.send("Hi", null)
+            var req = reqLog[reqLog.length - 1]
+            compare(req.reasoning.effort, "high")
+            compare(req.reasoning.enabled, true)
+            ctl.reasoningEffort = ""
+            ctl.thinkingEnabled = false
+            ctl.activeCaps = ["tools"]
+        }
+
+        // Turn-Override: /think off für DIESEN Turn, danach wieder Standard.
+        function test_turnOverrideThinkOff() {
+            ctl.thinkingEnabled = true
+            ctl.activeCaps = ["tools", "thinking"]
+            ctl.setTurnReasoning(false, "")
+            ctl.send("Hi", null)
+            var req1 = reqLog[reqLog.length - 1]
+            compare(req1.reasoning.enabled, false)
+            lastJob.done({ content: "A", thinking: "", toolCalls: [] })   // Turn abschließen
+            // nächster Turn: Override verbraucht
+            ctl.send("Nochmal", null)
+            var req2 = reqLog[reqLog.length - 1]
+            compare(req2 !== req1, true)
+            compare(req2.reasoning.enabled, true)
+            ctl.thinkingEnabled = false
+            ctl.activeCaps = ["tools"]
+        }
+
+        function test_turnOverrideEffortImRequest() {
+            ctl.reasoningEffort = "low"
+            ctl.activeCaps = ["tools", "thinking"]
+            ctl.thinkingEnabled = true
+            ctl.setTurnReasoning(null, "max")
+            ctl.send("Hi", null)
+            var req = reqLog[reqLog.length - 1]
+            compare(req.reasoning.effort, "max")
+            ctl.reasoningEffort = ""
+            ctl.thinkingEnabled = false
+            ctl.activeCaps = ["tools"]
         }
     }
 }

@@ -205,6 +205,25 @@ TestCase {
         compare(client.models[2].imageOutput, false)
     }
 
+    // Reasoning-Fähigkeiten (P-C): das reasoning-Feld des Modells liefert
+    // supported_efforts + default_effort + mandatory. DeepSeek V4 Flash hat
+    // supported_efforts ["max","high","low"], default "high", nicht mandatory.
+    function test_modelsTragenReasoningFaehigkeiten() {
+        client.refreshModels()
+        mockHttp.answer(0, { "ok": true, "data": { "data": [
+            { "id": "deepseek", "reasoning": { "mandatory": false,
+                "supported_efforts": ["max", "high", "low"], "default_effort": "high" } },
+            { "id": "simpl" }
+        ] } })
+        compare(client.models[0].efforts[0], "max")
+        verify(client.models[0].efforts.indexOf("low") !== -1)
+        compare(client.models[0].defaultEffort, "high")
+        compare(client.models[0].thinkingMandatory, false)
+        // Modell ohne Metadaten: leere Fähigkeiten, kein Default
+        compare(client.models[1].efforts.length, 0)
+        compare(client.models[1].defaultEffort, "")
+    }
+
     // ---------- Capabilities ----------
 
     // OpenAI-Server haben kein /api/show. Statt zu raten liefert der Client
@@ -550,6 +569,40 @@ TestCase {
         verify(!(c.headers && c.headers["Authorization"]))
         mockHttp.answer(mockHttp.calls.length - 1, { "ok": true, "data": {} })
         verify(out.ok)
+    }
+
+    // ---------- Reasoning pro Anfrage (P-B) ----------
+
+    // OpenRouter: req.reasoning {enabled, effort} -> reasoning.enabled (map)
+    // + reasoning_effort auf Top-Level (OpenAI-Stil).
+    function test_reasoningMappingOpenRouter() {
+        var job = client.chat({ "model": "m", "messages": [],
+                                "reasoning": { "enabled": true, "effort": "high" } })
+        var b = job._stream.postedBody
+        verify(b.reasoning !== undefined)
+        compare(b.reasoning.enabled, true)
+        compare(b.reasoning_effort, "high")
+        job.destroy()
+    }
+    // llama-server: reasoning_effort auf Top-Level (Server versteht es pro
+    // Request laut llama.cpp-Doku); kein reasoning-map nötig, aber wir senden
+    // beides tolerant (der Server ignoriert Unbekanntes).
+    function test_reasoningEffortLlamaTopLevel() {
+        var job = client.chat({ "model": "m", "messages": [],
+                                "reasoning": { "enabled": false, "effort": "none" } })
+        var b = job._stream.postedBody
+        compare(b.reasoning_effort, "none")
+        compare(b.reasoning.enabled, false)
+        job.destroy()
+    }
+    // Effort leer: nicht senden.
+    function test_reasoningOhneEffortSendetKeinFeld() {
+        var job = client.chat({ "model": "m", "messages": [],
+                                "reasoning": { "enabled": true, "effort": "" } })
+        var b = job._stream.postedBody
+        compare(b.reasoning.enabled, true)
+        verify(b.reasoning_effort === undefined)
+        job.destroy()
     }
 
     // ---------- Bildausgabe (Phase 5, non-streaming) ----------

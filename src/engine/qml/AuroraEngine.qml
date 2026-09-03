@@ -55,6 +55,7 @@ QtObject {
 
     // Chat-API
     function send(text, extra) { _ctl.send(text, extra) }
+    function setTurnReasoning(enabled, effort) { _ctl.setTurnReasoning(enabled, effort) }
     function compact() { _ctl.compact() }
     function exportConversation() { return _ctl.exportConversation() }
     function stop() { _ctl.stop() }

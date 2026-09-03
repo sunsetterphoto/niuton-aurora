@@ -123,6 +123,10 @@ QtObject {
         }
         if (request.tools && request.tools.length > 0) payload.tools = request.tools
         if (request.think !== undefined) payload.think = request.think
+        // P-B: übergreifendes req.reasoning {enabled,effort?} -> Ollama kennt nur
+        // think (an/aus); den Effort kann Ollama nicht, er wird bewusst ignoriert.
+        if (request.reasoning && payload.think === undefined)
+            payload.think = request.reasoning.enabled === true
         if (request.options && Object.keys(request.options).length > 0) payload.options = request.options
         var job = _jobFactory.createObject(client, {
             "httpRef": http,

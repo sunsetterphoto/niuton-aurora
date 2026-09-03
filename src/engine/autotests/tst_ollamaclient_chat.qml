@@ -84,6 +84,23 @@ TestCase {
         job.destroy()
     }
 
+    // P-B: req.reasoning wird auf Ollama think abgebildet (Effort kennt Ollama
+    // nicht — wird ignoriert).
+    function test_reasoningMappedAufThink() {
+        var job = client.chat({ "model": "qwen3.5:9b", "messages": [],
+                                "reasoning": { "enabled": true, "effort": "high" } })
+        compare(job._stream.postedBody.think, true)     // enabled -> think:true
+        verify(job._stream.postedBody.reasoning_effort === undefined)  // Ollama kennt keinen Effort
+        job.destroy()
+    }
+
+    function test_reasoningAusErzeugtThinkFalse() {
+        var job = client.chat({ "model": "qwen3.5:9b", "messages": [],
+                                "reasoning": { "enabled": false } })
+        compare(job._stream.postedBody.think, false)
+        job.destroy()
+    }
+
     function test_optionsImPayload() {
         var job = client.chat({ "model": "m", "messages": [],
                                 "options": { "num_ctx": 8192, "temperature": 0.7 } })

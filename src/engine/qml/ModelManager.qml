@@ -562,4 +562,25 @@ QtObject {
             callback(caps)
         })
     }
+
+    // P-C: Unterstützte Reasoning-Effort-Level des aktiven Modells. Leer =
+    // unbekannt → die Aufrufer (Header/Command) bieten die OpenAI-Standardwerte
+    // an. (Nur OpenAI-Clients liefern efforts; Ollama/llama-Konsument greifen
+    // auf die Defaults zurück.)
+    function activeEfforts() {
+        var c = activeClient()
+        if (!c || c.baseUrl === "") return []
+        var m = null
+        for (var i = 0; i < c.models.length; i++)
+            if (c.models[i].name === activeModel) { m = c.models[i]; break }
+        return (m && m.efforts) ? m.efforts.slice() : []
+    }
+    function activeDefaultEffort() {
+        var c = activeClient()
+        if (!c || c.baseUrl === "") return ""
+        var m = null
+        for (var i = 0; i < c.models.length; i++)
+            if (c.models[i].name === activeModel) { m = c.models[i]; break }
+        return (m && m.defaultEffort) ? m.defaultEffort : ""
+    }
 }

@@ -105,10 +105,17 @@ QtObject {
                     // (llama-server) — dann 0/false.
                     var outMod = (m.architecture && m.architecture.output_modalities)
                         ? m.architecture.output_modalities : []
+                    // Reasoning-Fähigkeiten (P-C): supported_efforts,
+                    // default_effort, mandatory — für /effort-Validierung und
+                    // Tuner. Fehlen ohne Metadaten.
+                    var rsn = m.reasoning || {}
                     fresh.push({ "name": name, "sizeGB": 0,
                                  "loaded": false, "digest": "",
                                  "contextLength": m.context_length || 0,
-                                 "imageOutput": outMod.indexOf("image") !== -1 })
+                                 "imageOutput": outMod.indexOf("image") !== -1,
+                                 "efforts": rsn.supported_efforts || [],
+                                 "defaultEffort": rsn.default_effort || "",
+                                 "thinkingMandatory": rsn.mandatory === true })
                 }
                 client.models = fresh
                 if (callback) callback(fresh)
@@ -193,6 +200,14 @@ QtObject {
         }
         if (request.tools && request.tools.length > 0) payload.tools = request.tools
         _mapOptions(payload, request.options)
+        // P-B: Reasoning pro Anfrage. OpenRouter versteht reasoning.enabled (map)
+        // + reasoning_effort (Top-Level, OpenAI-Stil); llama-server akzeptiert
+        // reasoning_effort pro Request (llama.cpp-Doku). Effort leer -> nicht senden.
+        if (request.reasoning) {
+            payload.reasoning = { "enabled": request.reasoning.enabled === true }
+            if (request.reasoning.effort !== undefined && request.reasoning.effort !== "")
+                payload.reasoning_effort = request.reasoning.effort
+        }
         var job = _jobFactory.createObject(client, {
             "httpRef": http,
             "streamFactory": sseFactory,

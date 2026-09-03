@@ -41,6 +41,12 @@ QtObject {
     property bool comfyAvailable: false
     property string homeDir: ""
     property bool thinkingEnabled: false
+    // Reasoning-Effort als GLOBALER Default (pro Modell im Tuner/Config) —
+    // "" = Modell-Standard. Pro Anfrage überschreibbar via setTurnReasoning.
+    property string reasoningEffort: ""
+    // Turn-Override für den NÄCHSTEN send() (von /think,/effort gesetzt):
+    // {enabled?: bool, effort?: string}; wird nach dem Turn verbraucht.
+    property var _turnReasoning: null
 
     // --- Beobachtbarer Zustand ---
     property ListModel chatModel: ListModel {}
@@ -367,6 +373,15 @@ QtObject {
     }
 
     // ---- Öffentlicher Einstieg ----
+    // Reasoning-Override für den NÄCHSTEN Zug (Slash-Befehle /think, /effort):
+    // enabled null = Globalwert behalten; effort "" = Globalwert behalten.
+    function setTurnReasoning(enabled, effort) {
+        var turn = { "enabled": enabled, "effort": effort }
+        if (enabled === null || enabled === undefined) turn.enabled = ctl.thinkingEnabled
+        if (effort === null || effort === undefined) turn.effort = ctl.reasoningEffort
+        _turnReasoning = turn
+    }
+
     function send(text, extra) {
         if (busy) return
         _generation++
@@ -534,7 +549,19 @@ QtObject {
         var caps = ctl.activeCaps || []
         var req = { "model": ctl.activeModel, "messages": _buildMessages(), "keepAlive": "10m" }
         if (withTools && caps.indexOf("tools") !== -1) req.tools = ctl.registry.definitions(_buildCtx())
-        if (caps.indexOf("thinking") !== -1) req.think = ctl.thinkingEnabled
+        // Reasoning pro Anfrage (P-B): req.reasoning = {enabled, effort?}.
+        // Der Turn-Override (von /think, /effort) ersetzt Globalwerte für diesen
+        // einen Zug und wird danach verbraucht.
+        if (caps.indexOf("thinking") !== -1) {
+            var r = { "enabled": ctl.thinkingEnabled }
+            var turn = ctl._turnReasoning
+            var eff = (turn && turn.effort) ? turn.effort : ctl.reasoningEffort
+            if (eff !== "") r.effort = eff
+            if (turn && turn.enabled !== null && turn.enabled !== undefined)
+                r.enabled = turn.enabled
+            req.reasoning = r
+            ctl._turnReasoning = null
+        }
         req.options = ctl.settings ? ctl.settings.paramsFor(ctl.activeModel) : ({})
 
         var job = ctl.chatFn(req)

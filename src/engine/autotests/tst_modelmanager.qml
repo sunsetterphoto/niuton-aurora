@@ -721,6 +721,27 @@ TestCase {
         compare(mockHttp.calls[j].body.modalities.length, 2)
     }
 
+    // P-C: activeEfforts() liefert die unterstützten Reasoning-Effort-Level des
+    // aktiven Modells (für /effort-Validierung + Header-Dropdown); unbekannt/leer
+    // = keine Einschränkung (alle OpenAI-Standard-Level).
+    function test_activeEffortsDesAktivenModells() {
+        mgr.keyring = mockKeyring
+        ConfigStore.setValue("openrouterEnabled", true)
+        mgr.refresh()
+        var i = mockHttp.find("openrouter.ai/api/v1/models")
+        verify(i !== -1)
+        mockHttp.answer(i, { "ok": true, "data": { "data": [
+            { "id": "deepseek", "reasoning": { "supported_efforts": ["max", "high", "low"],
+                                               "default_effort": "high" } }] } })
+        mgr.selectModel("openrouter:deepseek")
+        var eff = mgr.activeEfforts()
+        verify(eff.length >= 1)
+        compare(eff.indexOf("high") !== -1, true)
+        compare(eff.indexOf("low") !== -1, true)
+        verify(eff.indexOf("medium") === -1)   // DeepSeek unterstützt kein medium
+        compare(mgr.activeDefaultEffort(), "high")
+    }
+
     // Bestandsauswahl "remote:<modell>" muss weiter funktionieren: sie zeigt
     // auf das erste Netzwerk-Backend. refreshModels braucht neben der Probe
     // den zweiten /api/tags- und den /api/ps-Aufruf, bevor models steht —

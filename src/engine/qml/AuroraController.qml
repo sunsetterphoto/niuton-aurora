@@ -561,6 +561,34 @@ QtObject {
             var val = _matchModel(arg)
             if (val === "") { _notify("Modell nicht gefunden: " + arg); break }
             selectModel(val); break
+        case "think":
+            if (arg === "") { _notify("think: /think on|off"); break }
+            var on = (arg.toLowerCase() === "on" || arg.toLowerCase() === "true")
+            var off = (arg.toLowerCase() === "off" || arg.toLowerCase() === "false")
+            if (!on && !off) { _notify("think: /think on|off"); break }
+            engine.setTurnReasoning(on, null)
+            _notify(on ? "Reasoning an (dieser Anfrage)" : "Reasoning aus (dieser Anfrage)")
+            break
+        case "effort":
+            if (arg === "") { _notify("effort: /effort <level>"); break }
+            var lvl = arg.trim().toLowerCase()
+            if (lvl === "none") {
+                engine.setTurnReasoning(false, null)
+                _notify("Reasoning aus (diese Anfrage)")
+                break
+            }
+            // Modell-spezifisch validieren: nur Level anbieten, die das aktive
+            // Modell unterstützt (P-C). Ohne Metadaten: OpenAI-Standardwerte.
+            var allowed = modelManager.activeEfforts()
+            var fallback = ["minimal", "low", "medium", "high", "xhigh", "max"]
+            var pool = (allowed.length > 0) ? allowed : fallback
+            if (pool.indexOf(lvl) === -1) {
+                _notify("effort: dieses Modell unterstützt: " + pool.join("|") + " (none = aus)")
+                break
+            }
+            engine.setTurnReasoning(null, lvl)
+            _notify("Effort gesetzt (" + lvl + ") für diese Anfrage")
+            break
         }
     }
 

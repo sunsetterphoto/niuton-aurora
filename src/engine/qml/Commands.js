@@ -8,6 +8,8 @@ var _commands = [
     { name: "model",   description: "Modell wechseln",                            argHint: "<name>",        takesArg: true,  argSource: "models" },
     { name: "search",  description: "Web-Suche",                                  argHint: "<suchbegriff>", takesArg: true,  argSource: "" },
     { name: "image",   description: "Bild-Modus einschalten",                     argHint: "",              takesArg: false, argSource: "" },
+    { name: "think",   description: "Reasoning pro Anfrage (on/off)",             argHint: "on|off",        takesArg: true,  argSource: "" },
+    { name: "effort",  description: "Reasoning-Effort pro Anfrage",               argHint: "low|medium|high|max|none", takesArg: true, argSource: "" },
     { name: "memory",  description: "Erinnerungen (memory.md) öffnen",            argHint: "",              takesArg: false, argSource: "" }
     ,{ name: "export",  description: "Konversation als Markdown exportieren",      argHint: "",              takesArg: false, argSource: "" }
     ,{ name: "knowledge", description: "Wissensbasis (bewertete Antworten) verwalten", argHint: "",          takesArg: false, argSource: "" }

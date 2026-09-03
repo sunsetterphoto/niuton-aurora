@@ -7,7 +7,7 @@ TestCase {
 
     function test_list_undFind() {
         var l = Commands.list()
-        verify(l.length >= 7)
+        verify(l.length >= 9)
         compare(Commands.find("model").argSource, "models")
         compare(Commands.find("new").argSource, "")
         compare(Commands.find("model").takesArg, true)
@@ -17,6 +17,10 @@ TestCase {
         verify(Commands.find("export") !== null)
         compare(Commands.find("knowledge").takesArg, false)
         verify(Commands.find("knowledge") !== null)
+        verify(Commands.find("think") !== null)
+        compare(Commands.find("think").takesArg, true)
+        verify(Commands.find("effort") !== null)
+        compare(Commands.find("effort").takesArg, true)
     }
 
     function test_parse() {

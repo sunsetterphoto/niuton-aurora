@@ -90,15 +90,49 @@ finalen Message.
 
 ---
 
-## 3. Was noch offen ist
+## 3. Verifiziert + Roadmap
 
-1. **OpenRouter-Schlüssel** liegt noch nicht vor → bisher nur gegen die Doku/live Modellliste
-   verifiziert; Chat + Auth + Kosten-Lookup + Bildmodell gegen die echte API stehen aus.
+### 3.1 Live-Verifiziert gegen die echte OpenRouter-API (Key liegt im KWallet, 02.09.2026)
+
+- **Auth**: `GET /v1/models` mit Bearer → 200, 424 Chat-Modelle.
+- **Chat + Thinking**: DeepSeek V4 Flash streamt live; Denktext kommt als `delta.reasoning`
+  (String) + `reasoning_details`, NICHT `reasoning_content` → gefixt in `98cfe44`.
+- **Kosten-Lookup**: `GET /v1/generation?id=…` → `data.total_cost` (verifiziert 5.05e-07 $).
+- **Video-API (wichtiger Fund)**: OpenRouter hat eine EIGENSTÄNDIGE Video-Generierung, die NICHT
+  in `/v1/models` auftaucht (das ist nur Chat):
+  - `GET /v1/videos/models` → **28 Video-Modelle** (Veo 3.1, Sora 2, Kling v3, Wan 2.7/3.0,
+    Hailuo 3, FLUX.3 Video, Runway Gen-4.5 …), jedes mit `supported_durations`,
+    `supported_aspect_ratios`, `generate_audio`, Preis-SKUs (`pricing_skus`).
+  - `POST /v1/videos` → `202 {id, polling_url, status}` (async Job).
+  - `GET /v1/videos/{jobId}` → `status` (`pending|in_progress|completed|failed|cancelled|expired`)
+    + `unsigned_urls` + `usage.cost`.
+  - `GET /v1/videos/{jobId}/content?index=0` → `video/mp4` (Binary; Download auch via
+    `unsigned_urls[0]` direkt möglich).
+  - Request-Parameter: `model, prompt, aspect_ratio, duration, resolution, frame_images
+    (first/last, als image_url), generate_audio, seed`.
+
+### 3.2 Offen / Ausstehend
+
+1. **Video-Generierung (`generate_video`-Tool)** — P1 der Roadmap, als Nächstes.
 2. **PR** für `feature/openai-backend` noch nicht eröffnet.
 3. **Backup-Branch `backup/vor-ip-bereinigung`** (lokal, mit echten LAN-IPs) nicht pushen —
    löschen, sobald der Stand abgenommen ist.
 4. **ComfyUI am LAN-Gerät** war beim Test nicht erreichbar (Gerät aus); Eintrag zeigt korrekt
    „nicht erreichbar".
+
+### 3.3 Roadmap (P1–P6, priorisiert)
+
+| Prio | Feature | Backend | Aufwand |
+|---|---|---|---|
+| **P1** | `generate_video`-Tool (Veo 3.1 Lite / Kling, async-Job-Polling, Video-Bubble) | OpenRouter `/v1/videos` | groß |
+| **P2** | Audio-Generierung (`lyria` kostenlos) + Wiedergabe (`aplay`/Player) | OpenRouter (chat, non-streaming) | mittel |
+| **P3** | Audio-Analyse im Chat (46 Modelle; optional statt lokalem Whisper) | OpenRouter | mittel |
+| **P4** | Video-Analyse als Anhang (79 Video-in-Modelle; Anhang `video_url`) | OpenRouter | groß |
+| **P5** | Lokal weiterentwickeln: img2img in ComfyUI, weitere TTS-Stimmen | lokal | mittel |
+| **P6** | Datei-/PDF-Analyse (`structured_outputs` von 340 Modellen) | OpenRouter | klein |
+
+Alle Cloud-Punkte folgen dem Leitprinzip: **nur explizit, nie automatisch**, Kosten sichtbar,
+Quellenwahl wie bei Bild (ComfyUI vs. Cloud).
 
 ---
 

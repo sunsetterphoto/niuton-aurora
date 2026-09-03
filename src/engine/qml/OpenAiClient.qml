@@ -139,6 +139,8 @@ QtObject {
     // Aurora spricht intern Ollama-Optionen; OpenAI nimmt die Sampling-Werte auf
     // Top-Level. num_ctx bleibt außen vor: die Kontextgröße ist beim
     // llama-server ein Startparameter (-c), kein Request-Feld.
+    // P-D: auch frequency/presence_penalty, top_a, logit_bias, logprobs und
+    // response_format — vorher wurden sie still verschluckt.
     function _mapOptions(payload, options) {
         if (!options) return
         if (options.temperature !== undefined) payload.temperature = options.temperature
@@ -147,6 +149,21 @@ QtObject {
         if (options.num_predict !== undefined) payload.max_tokens = options.num_predict
         if (options.seed !== undefined) payload.seed = options.seed
         if (options.stop !== undefined) payload.stop = options.stop
+        if (options.frequency_penalty !== undefined) payload.frequency_penalty = options.frequency_penalty
+        if (options.presence_penalty !== undefined) payload.presence_penalty = options.presence_penalty
+        if (options.top_a !== undefined) payload.top_a = options.top_a
+        if (options.logit_bias !== undefined) payload.logit_bias = options.logit_bias
+        if (options.logprobs !== undefined) payload.logprobs = options.logprobs
+        if (options.top_logprobs !== undefined) payload.top_logprobs = options.top_logprobs
+        // response_format als Enum ("json"/"json_object") -> OpenAI-Objekt
+        if (options.response_format !== undefined) {
+            if (options.response_format === "json" || options.response_format === "json_object")
+                payload.response_format = { "type": "json_object" }
+            else if (options.response_format === "json_schema")
+                payload.response_format = { "type": "json_schema" }
+            else
+                payload.response_format = options.response_format   // bereits Objekt
+        }
     }
 
     // Anhänge: Aurora transportiert sie im Ollama-Format (message.images als

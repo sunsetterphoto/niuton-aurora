@@ -151,5 +151,36 @@ Item {
             var o = savedSpy.signalArguments[0][1]
             compare(o.temperature, 0.7)
         }
+
+        // P-D: neue Sampling-Parameter laden + speichern
+        function test_erweiterteOptionsLadenUndSpeichern() {
+            reopenWith("m", { "frequency_penalty": 1.2, "presence_penalty": 0.3,
+                              "top_a": 0.1, "logit_bias": { "15043": -1 },
+                              "response_format": "json" })
+            verify(tuner.freqPenaltyActive)
+            compare(tuner.freqPenaltyValue, 1.2)
+            verify(tuner.presencePenaltyActive)
+            compare(tuner.presencePenaltyValue, 0.3)
+            verify(tuner.topAActive)
+            compare(tuner.topAValue, 0.1)
+            verify(tuner.logitBiasActive)
+            compare(tuner.logitBiasText.indexOf('"15043"') !== -1, true)   // JSON, ohne Space-Sensitivität
+            verify(tuner.responseFormatActive)
+            compare(tuner.responseFormatIndex, 1)
+            tuner._save()
+            var o = savedSpy.signalArguments[0][1]
+            compare(o.frequency_penalty, 1.2)
+            compare(o.logit_bias["15043"], -1)
+            compare(o.response_format, "json")
+        }
+        function test_erweiterteInaktivWerdenNichtGespeichert() {
+            reopenWith("m", {})
+            verify(!tuner.freqPenaltyActive)
+            verify(!tuner.responseFormatActive)
+            tuner._save()
+            var o = savedSpy.signalArguments[0][1]
+            verify(o.frequency_penalty === undefined)
+            verify(o.response_format === undefined)
+        }
     }
 }

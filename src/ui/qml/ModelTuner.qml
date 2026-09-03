@@ -41,6 +41,17 @@ Rectangle {
     property alias seedText: seedRow.text
     property alias stopActive: stopRow.active
     property alias stopText: stopRow.text
+    // P-D: zusätzliche OpenAI-Sampling-Parameter
+    property alias freqPenaltyActive: freqPenaltyRow.active
+    property alias freqPenaltyValue: freqPenaltyRow.value
+    property alias presencePenaltyActive: presencePenaltyRow.active
+    property alias presencePenaltyValue: presencePenaltyRow.value
+    property alias topAActive: topARow.active
+    property alias topAValue: topARow.value
+    property alias logitBiasActive: logitBiasRow.active
+    property alias logitBiasText: logitBiasRow.text
+    property alias responseFormatActive: responseFormatRow.active
+    property alias responseFormatIndex: responseFormatRow.currentIndex
 
     implicitHeight: tunerColumn.implicitHeight + Kirigami.Units.smallSpacing * 2
     radius: Kirigami.Units.gridUnit * 0.6
@@ -60,6 +71,22 @@ Rectangle {
         _loadField(numPredictRow, p, "num_predict")
         _loadField(seedRow, p, "seed")
         _loadStop(stopRow, p)
+        // P-D: zusätzliche Sampling-Parameter
+        _loadSlider(freqPenaltyRow, p, "frequency_penalty")
+        _loadSlider(presencePenaltyRow, p, "presence_penalty")
+        _loadSlider(topARow, p, "top_a")
+        // logit_bias ist ein JSON-Objekt -> als kompaktes JSON im Freitext
+        if (p.logit_bias !== undefined) {
+            logitBiasRow.active = true
+            try { logitBiasRow.text = JSON.stringify(p.logit_bias) }
+            catch (e) { logitBiasRow.text = "" }
+        } else { logitBiasRow.active = false; logitBiasRow.text = "" }
+        if (p.response_format) {
+            var _rf = String(p.response_format)
+            responseFormatRow.active = true
+            responseFormatRow.selectIndex((_rf === "json" || _rf === "json_object") ? 1
+                                         : (_rf === "json_schema") ? 2 : 0)
+        } else { responseFormatRow.active = false; responseFormatRow.selectIndex(0) }
         // Erweitert automatisch aufklappen, wenn ein erweiterter Parameter aktiv ist
         // (nie zwangsweise zuklappen).
         advancedToggle.checked = advancedToggle.checked
@@ -120,6 +147,19 @@ Rectangle {
                                   .filter(function(x) { return x !== "" })
             if (arr.length) o.stop = arr
         }
+        // P-D: zusätzliche Sampling-Parameter (nur aktive)
+        if (freqPenaltyRow.active)   o.frequency_penalty = _sliderSaveValue(freqPenaltyRow)
+        if (presencePenaltyRow.active) o.presence_penalty = _sliderSaveValue(presencePenaltyRow)
+        if (topARow.active)          o.top_a = _sliderSaveValue(topARow)
+        if (logitBiasRow.active) {
+            var lb = logitBiasRow.text.trim()
+            if (lb !== "") {
+                try { o.logit_bias = JSON.parse(lb) }
+                catch (e) { /* ungültiges JSON: nicht speichern */ }
+            }
+        }
+        if (responseFormatRow.active && responseFormatRow.currentIndex > 0)
+            o.response_format = (responseFormatRow.currentIndex === 2) ? "json_schema" : "json"
         tuner.saveRequested(_snapModel, o)
     }
     function _saveInt(row, o, key) {
@@ -302,6 +342,55 @@ Rectangle {
                 label: "min_p"
                 minValue: 0.0; maxValue: 1.0; step: 0.01; refValue: 0.05; decimals: 2
                 tooltip: "Mindest-Wahrscheinlichkeit eines Tokens relativ zum besten. Alternative zu top_p; höher = konservativer."
+            }
+            // P-D: zusätzliche OpenAI-Sampling-Parameter (nur OpenAI/OpenRouter/
+            // llama — Ollama kennt sie teils via options, wird aber der Einfachheit
+            // halber weiter mappen; Modell-Doku beachten).
+            SliderRow {
+                id: freqPenaltyRow
+                label: "frequency_penalty"
+                minValue: -2.0; maxValue: 2.0; step: 0.01; refValue: 0.0; decimals: 2
+                tooltip: "Bestraft wiederholte Tokens proportional zur Häufigkeit. <0 fördert Wiederholung, >0 hemmt."
+            }
+            SliderRow {
+                id: presencePenaltyRow
+                label: "presence_penalty"
+                minValue: -2.0; maxValue: 2.0; step: 0.01; refValue: 0.0; decimals: 2
+                tooltip: "Bestraft Tokens, die bereits vorkamen (unabhängig von Häufigkeit). >0 = mehr Vielfalt."
+            }
+            SliderRow {
+                id: topARow
+                label: "top_a"
+                minValue: 0.0; maxValue: 1.0; step: 0.01; refValue: 0.0; decimals: 2
+                tooltip: "Nicht-konformes Sampling (alternativ zu top_p). Nur wenige Modelle unterstützen es."
+            }
+            FieldRow {
+                id: logitBiasRow
+                label: "logit_bias"
+                tooltip: "JSON-Objekt: Token-ID -> Bias (z. B. {\"15043\": -1}). Erhöht/verringert die Wahrscheinlichkeit bestimmter Tokens."
+            }
+RowLayout {
+                id: responseFormatRow
+                Layout.fillWidth: true
+                spacing: Kirigami.Units.smallSpacing
+                property bool active: responseFormatActiveBox.checked
+                // Lese-Funktion über forward-Property (Combo) + Schreibmethode,
+                // weil eine Forward-Property nur lesbar verknüpft (zurück
+                // schreiben würde den Combo nicht bewegen).
+                property int currentIndex: responseFormatCombo.currentIndex
+                function selectIndex(i) { responseFormatCombo.currentIndex = i }
+                QQC2.CheckBox { id: responseFormatActiveBox }
+                QQC2.Label {
+                    text: "response_format"
+                    Layout.preferredWidth: Kirigami.Units.gridUnit * 7
+                    elide: Text.ElideRight
+                }
+                QQC2.ComboBox {
+                    id: responseFormatCombo
+                    Layout.fillWidth: true
+                    enabled: responseFormatActiveBox.checked
+                    model: ["Standard", "json", "json_schema"]
+                }
             }
             FieldRow {
                 id: stopRow

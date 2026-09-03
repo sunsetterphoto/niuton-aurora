@@ -379,6 +379,27 @@ TestCase {
         job.destroy()
     }
 
+    // P-D: zusätzliche Sampling-/Ausgabe-Parameter, die bisher verschluckt
+    // wurden — jetzt sauber auf OpenAI-Top-Level gemappt.
+    function test_erweiterteOptionenWerdenGemappt() {
+        var job = client.chat({ "model": "m", "messages": [],
+                                "options": { "frequency_penalty": 1.2,
+                                             "presence_penalty": 0.3,
+                                             "top_a": 0.1,
+                                             "logit_bias": { "15043": -1 },
+                                             "logprobs": true, "top_logprobs": 3,
+                                             "response_format": "json" } })
+        var b = job._stream.postedBody
+        compare(b.frequency_penalty, 1.2)
+        compare(b.presence_penalty, 0.3)
+        compare(b.top_a, 0.1)
+        compare(b.logit_bias["15043"], -1)
+        compare(b.logprobs, true)
+        compare(b.top_logprobs, 3)
+        compare(b.response_format.type, "json_object")
+        job.destroy()
+    }
+
     function test_fehlerBeendetJob() {
         var job = client.chat({ "model": "m", "messages": [] })
         _connectLog(job)

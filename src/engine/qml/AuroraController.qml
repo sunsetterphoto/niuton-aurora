@@ -78,8 +78,18 @@ QtObject {
     // Globaler Reasoning-Effort-Default (Header-Dropdown). Leer = Modell-Default.
     property string reasoningEffort: ""
     // Header zeigt Effort nur, wenn das aktive Modell Effort unterstützt.
-    readonly property var effortChoices: modelManager ? modelManager.activeEfforts() : []
-    readonly property bool effortAvailable: effortChoices.length > 0
+    // KEINE readonly-Bindung: activeEfforts() hängt an internem Zustand
+    // (activeModel/Client-Modelle), readonly würde nie neu auswerten -> das
+    // Dropdown bliebe unsichtbar. Stattdessen mutable + Refresh bei Wechseln.
+    property var effortChoices: []
+    property bool effortAvailable: false
+    onSelectedModelChanged: _refreshEffortChoices()
+    onActiveModelChanged: _refreshEffortChoices()
+    function _refreshEffortChoices() {
+        effortChoices = modelManager ? modelManager.activeEfforts() : []
+        effortAvailable = effortChoices.length > 0
+    }
+    Component.onCompleted: _refreshEffortChoices()
     property bool imageMode: false
 
     // ==================== Konversationsliste (Sidebar-Modell) ====================

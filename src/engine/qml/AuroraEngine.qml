@@ -20,6 +20,9 @@ QtObject {
     // Explizite Cloud-Videogenerierung (OpenRouter /v1/videos); reicht an den
     // ChatController für ctx.videoGenFn (generate_video-Tool).
     property var videoGenFn: null
+    // Explizite Cloud-Audiogenerierung; reicht an den ChatController für
+    // ctx.audioGenFn (generate_audio-Tool).
+    property var audioGenFn: null
     property string homeDir: ""
     property bool thinkingEnabled: false
 
@@ -42,6 +45,7 @@ QtObject {
         chatFn: engine.chatFn; embedFn: engine.embedFn; homeDir: engine.homeDir; thinkingEnabled: engine.thinkingEnabled
         imageGenFn: engine.imageGenFn
         videoGenFn: engine.videoGenFn
+        audioGenFn: engine.audioGenFn
         activeModel: engine.modelManager ? engine.modelManager.activeModel : ""
         activeCaps: engine.modelManager ? engine.modelManager.activeCaps : []
         isRemote: engine.modelManager ? engine.modelManager.isRemote : false
@@ -62,6 +66,7 @@ QtObject {
     function loadConversation(id) { _ctl.loadConversation(id) }
     function appendGeneratedImage(p, t, toolInitiated) { _ctl.appendGeneratedImage(p, t, toolInitiated) }
     function appendGeneratedVideo(p, t, toolInitiated) { _ctl.appendGeneratedVideo(p, t, toolInitiated) }
+    function appendGeneratedAudio(p, t, toolInitiated) { _ctl.appendGeneratedAudio(p, t, toolInitiated) }
     function rateMessage(msgId, rating) { _ctl.rateMessage(msgId, rating) }
     function stripRagSource(rowMsgId, sourceId) { _ctl.stripRagSource(rowMsgId, sourceId) }
 

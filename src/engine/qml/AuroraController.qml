@@ -185,6 +185,41 @@ QtObject {
                 if (cb) cb({ "ok": true, "started": true, "jobId": r.jobId })
             })
         }
+        // Explizite Audio-Generierung (OpenRouter, freies lyria-Modell).
+        // Streaming-Job: sobald die base64-WAV komplett ist, schreiben wir sie
+        // nach appData/audio, hängen eine Bubble an (origin-Guard wie Video)
+        // und spielen sie über aplay ab. cb wird sofort mit {ok, started}.
+        audioGenFn: function(req, cb) {
+            if (!settings.openrouterEnabled || ac.baseUrl === "") {
+                if (cb) cb({ "ok": false, "error": "OpenRouter ist nicht aktiviert" })
+                return
+            }
+            if (!req || !req.prompt) {
+                if (cb) cb({ "ok": false, "error": "Kein Audio-Prompt" })
+                return
+            }
+            var origin = req.originConvId || ""
+            ac.generate(req.prompt, { "voice": "alloy", "format": "wav" }, function(r) {
+                if (!r.ok || r.wavBase64 === "") {
+                    if (cb) cb({ "ok": false, "error": r.error || "Kein Audio erhalten" })
+                    return
+                }
+                var dir = FileIO.standardPath("appData") + "/audio"
+                var dest = dir + "/aurora-" + Date.now() + ".wav"
+                var w = FileIO.writeBase64(dest, r.wavBase64)
+                if (!w.ok) {
+                    if (cb) cb({ "ok": false, "error": "Audio konnte nicht gespeichert werden" })
+                    return
+                }
+                // origin-Guard: nur anhängen, wenn die Konversation unverändert ist
+                if (engine.conversationId === origin)
+                    engine.appendGeneratedAudio(dest, req.prompt, true)
+                // Wiedergabe (ein laufender aplay wird terminiert)
+                if (aplayRun.running) aplayRun.terminate()
+                aplayRun.start("aplay", ["-q", dest])
+                if (cb) cb({ "ok": true, "started": true, "path": dest })
+            })
+        }
     }
 
     // OpenRouter-Video-Client (eigene /v1/videos-API). Nur sichtbar, wenn
@@ -244,6 +279,23 @@ QtObject {
                 return
             }
         })
+    }
+
+    // OpenRouter-Audio-Generierung (Chat-API, modalities ["text","audio"],
+    // freies lyria-Modell). Streaming-Job: das Tool bestätigt sofort; sobald
+    // die base64-WAV da ist, schreiben wir sie in den Audio-Ordner und spielen
+    // sie über aplay (wie die TTS-Wiedergabe) — KEIN neues Media-Framework.
+    property AudioClient _audio: AudioClient {
+        id: ac
+        baseUrl: settings.openrouterEnabled ? "https://openrouter.ai/api" : ""
+        http: Http
+        keyring: Core.KeyRing
+        keyRef: "openrouter"
+    }
+
+    // aplay-Prozess für die Wiedergabe (ein laufender wird erst terminiert).
+    property ProcessRunner _aplayRun: ProcessRunner {
+        id: aplayRun
     }
 
     property VoiceRecorder _vr: VoiceRecorder {

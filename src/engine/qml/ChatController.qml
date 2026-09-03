@@ -28,6 +28,11 @@ QtObject {
     // aktiv ist — die Cloud ist nie automatisch. Das Tool kehrt sofort zurück;
     // die fertige MP4 hängt der AuroraController später an (appendGeneratedVideo).
     property var videoGenFn: null
+    // Explizite Cloud-Audiogenerierung (OpenRouter /v1/chat/completions mit
+    // modalities ["text","audio"]). Funktion (request, cb); cb({ok, started,
+    // error}). Streaming-Job: Tool bestätigt sofort, fertige WAV spielt der
+    // Controller ab (pointer).
+    property var audioGenFn: null
 
     // --- Kontext (Betrieb: an ModelManager gebunden; Test: gesetzt) ---
     property string activeModel: ""
@@ -150,6 +155,9 @@ QtObject {
             // Explizite Videoausgabe (generate_video-Tool): ebenfalls nur im
             // Kontext, wenn der Controller die Cloud-Funktion hat.
             "videoGenFn": ctl.videoGenFn,
+            // Explizite Audioausgabe (generate_audio-Tool): nur im Kontext,
+            // wenn der Controller die Cloud-Funktion hat.
+            "audioGenFn": ctl.audioGenFn,
             // Ursprungs-Konversation für Tools, die eine spätere Zuordnung brauchen
             // (generate_image reicht sie als originConvId an ComfyClient weiter, damit
             // der onFinished-Guard tool-Bilder ebenfalls der richtigen Konversation
@@ -1060,5 +1068,18 @@ QtObject {
         chatModel.setProperty(idx, "msgId", aid)
         if (toolInitiated !== true)
             _messages.push({ "role": "assistant", "content": "[Video generiert: " + prompt + "]", "_msgId": aid })
+    }
+
+    // Audio wie Bild/Video, aber mediaType "audio/wav" — Bubble bietet Abspielen.
+    function appendGeneratedAudio(path, prompt, toolInitiated) {
+        _appendRow({ isUser: false, ts: _nowTs(), mediaPath: path, mediaType: "audio/wav",
+                     text: "", status: "final" })
+        var idx = chatModel.count - 1
+        var aid = _persist({ "role": "assistant", "content": "[Audio generiert: " + prompt + "]",
+                             "mediaPath": path, "mediaType": "audio/wav", "status": "final",
+                             "model": ctl.activeModel, "backend": ctl.isRemote ? "remote" : "local" })
+        chatModel.setProperty(idx, "msgId", aid)
+        if (toolInitiated !== true)
+            _messages.push({ "role": "assistant", "content": "[Audio generiert: " + prompt + "]", "_msgId": aid })
     }
 }

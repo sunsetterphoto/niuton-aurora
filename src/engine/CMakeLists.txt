@@ -16,6 +16,7 @@ ecm_target_qml_sources(auroraengine SOURCES
     qml/OpenAiChatJob.qml
     qml/OpenRouterFreeStart.qml
     qml/VideoClient.qml
+    qml/AudioClient.qml
     qml/ModelManager.qml
     qml/ModelStore.qml
     qml/ServiceManager.qml
@@ -34,6 +35,7 @@ ecm_target_qml_sources(auroraengine SOURCES
     qml/tools/RunCommandTool.qml
     qml/tools/GenerateImageTool.qml
     qml/tools/GenerateVideoTool.qml
+    qml/tools/GenerateAudioTool.qml
     qml/VoiceRecorder.qml
     qml/Speaker.qml
     qml/ComfyClient.qml
@@ -75,6 +77,8 @@ if(BUILD_TESTING)
     aurora_engine_qmltest(tst_openrouterfreestart)
     aurora_engine_qmltest(tst_videoclient)
     aurora_engine_qmltest(tst_videotool)
+    aurora_engine_qmltest(tst_audiotool)
+    aurora_engine_qmltest(tst_audioclient)
     aurora_engine_qmltest(tst_ollamaclient_models)
     aurora_engine_qmltest(tst_ollamaclient_chat)
     aurora_engine_qmltest(tst_ollamaclient_embed)

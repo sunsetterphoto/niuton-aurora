@@ -135,6 +135,24 @@ Item {
             compare(ctl.chatModel.get(ctl.chatModel.count - 1).mediaPath, "/t.mp4")
         }
 
+        // Audio wie Bild/Video, aber mediaType "audio/wav" (Wiedergabe via aplay).
+        function test_appendGeneratedAudioAppendsAndPersists() {
+            ctl.appendGeneratedAudio("/a.wav", "etwas Melodisches")
+            var idx = ctl.chatModel.count - 1
+            compare(ctl.chatModel.get(idx).mediaPath, "/a.wav")
+            compare(ctl.chatModel.get(idx).mediaType, "audio/wav")
+            var found = false
+            for (var i = 0; i < storeMock.appended.length; i++)
+                if (storeMock.appended[i].mediaPath === "/a.wav") found = true
+            verify(found)
+        }
+        function test_toolAudioNotPushedToApiHistory() {
+            var before = ctl._messages.length
+            ctl.appendGeneratedAudio("/t.wav", "x", true)
+            compare(ctl._messages.length, before)
+            compare(ctl.chatModel.get(ctl.chatModel.count - 1).mediaPath, "/t.wav")
+        }
+
         // Persistenz-Spur (toolActivity-Reload): der Zug schreibt tool_calls-
         // Zeilen (appendToolCall pending) und aktualisiert sie über den Lauf
         // (running -> ok mit finishedAt + resultMessageId, gleiche dbId).

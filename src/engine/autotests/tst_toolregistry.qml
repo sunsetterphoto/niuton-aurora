@@ -95,6 +95,17 @@ Item {
             compare(reg.describe("generate_video", { prompt: "x" }), "Video generieren: x")
         }
 
+        // generate_audio nur mit audioGenFn im Kontext (Cloud nie automatisch)
+        function test_audioToolNurMitCloudFn() {
+            var dNo = reg.definitions(makeCtx(false)).map(function(d) { return d.function.name })
+            verify(dNo.indexOf("generate_audio") < 0)
+            var ctx = makeCtx(true)
+            ctx.audioGenFn = function(req, cb) {}
+            var dYes = reg.definitions(ctx).map(function(d) { return d.function.name })
+            verify(dYes.indexOf("generate_audio") >= 0)
+            compare(reg.describe("generate_audio", { prompt: "x" }), "Audio generieren: x")
+        }
+
         function test_executeDispatches() {
             var out = null
             reg.execute("read_file", { path: "/x" }, makeCtx(false), function(t) { out = t })

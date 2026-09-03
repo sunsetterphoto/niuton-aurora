@@ -225,6 +225,24 @@ QtObject {
         })
     }
 
+    // llama-server im Router-Modus: Modell gezielt entladen (VRAM freigeben), damit
+    // beim Wechsel zu Ollama nur EIN lokales Modell geladen bleibt. Best-effort:
+    // Fehler (Server ohne Router-Support) werden gemeldet, blockieren aber nie.
+    // callback({ok, error?})
+    function unloadModel(model, callback) {
+        _resolveKey(function() {
+            if (baseUrl === "") {
+                if (callback) callback({ "ok": false, "error": "kein Backend" })
+                return
+            }
+            http.postJson(baseUrl + "/models/unload", { "model": model },
+                function(res) {
+                    if (callback) callback({ "ok": res.ok,
+                                             "error": res.ok ? "" : (res.error || ("HTTP " + res.status)) })
+                }, 15000, client._authHeaders())
+        })
+    }
+
     // Bildgenerierung über ein Bild-Ausgabe-Modell (OpenRouter). NON-Streaming:
     // so dokumentiert (message.images[].image_url.url als data-URL) — die
     // SSE-Struktur für Bilder ist offiziell nicht spezifiziert, also nicht

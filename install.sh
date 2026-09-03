@@ -105,6 +105,29 @@ if [ "$WITH_QUADLETS" = "1" ]; then
     echo "    Kein Autostart: Start über Aurora > Einstellungen > Dienste"
 fi
 
+# llama-server-Backend (Bonsai 27B): User-Unit + Router-Preset. Vorhandene
+# Dateien NIE überschreiben — die Unit/Preset sind angepasste Vorlagen.
+# Die Preset wird aus dem Beispiel generiert und ersetzt <HOME> durch $HOME.
+LLAMA_UNIT_DIR="$HOME/.config/systemd/user"
+if [ -e "$SCRIPT_DIR/aurora-llama-server.service" ]; then
+    echo "[4.5/5] llama-server-Unit + Router-Preset …"
+    mkdir -p "$LLAMA_UNIT_DIR" "$HOME/.local/share/aurora"
+    if [ -e "$LLAMA_UNIT_DIR/aurora-llama-server.service" ]; then
+        echo "    Unit existiert bereits — unverändert gelassen (Router-Umstieg prüfen!)"
+    else
+        cp "$SCRIPT_DIR/aurora-llama-server.service" "$LLAMA_UNIT_DIR/"
+        echo "    Unit installiert (Pfad LLAMA_BIN prüfen!)"
+    fi
+    if [ -e "$HOME/.local/share/aurora/aurora-llama-models.ini" ]; then
+        echo "    Preset existiert bereits — unverändert gelassen"
+    else
+        sed "s|<HOME>|$HOME|g" "$SCRIPT_DIR/aurora-llama-models.example.ini" \
+            > "$HOME/.local/share/aurora/aurora-llama-models.ini"
+        echo "    Preset installiert (Modellpfad prüfen!)"
+    fi
+    systemctl --user daemon-reload >/dev/null 2>&1 || true
+fi
+
 mkdir -p "$(dirname "$ENV_FILE")"
 if ! grep -qs "QML_IMPORT_PATH" "$ENV_FILE" 2>/dev/null; then
     printf 'export QML_IMPORT_PATH="%s:${QML_IMPORT_PATH:-}"\n' "$QML_PATHS" >>"$ENV_FILE"

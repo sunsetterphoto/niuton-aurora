@@ -465,6 +465,10 @@ QtObject {
 
     function selectModel(value) {
         if (settings) settings.requestPersist("lastSelectedModel", value)
+        // Vorgänger-Backend merken, bevor umgeschaltet wird — für den
+        // Entlade-Hook unten (nur die QUELLE wird entladen, nie das Ziel).
+        var prevId = activeBackendId
+        var prevModelName = activeModel
         selectedModel = value
         if (value === "auto") {
             // isRemote NICHT hier zurücksetzen: resolveAndLoadModel() erledigt
@@ -488,6 +492,21 @@ QtObject {
             if (name !== activeModel || !modelLoaded) {
                 activeModel = name
                 _preloadActive()
+            }
+        }
+        // Entladen der QUELLE nach dem Umschalten (best-effort, nie blockierend):
+        // Wenn der Vorgänger ein llama-server-Backend war, soll dessen Modell im
+        // Router-Modus entladen werden, damit nur EIN lokales Modell geladen
+        // bleibt. Der gewählte Modellname ist egal — entladen wird das Modell,
+        // das der Vorgänger-Client geladen hatte (activeModel VOR dem Wechsel
+        // ist bereits überschrieben; wir nehmen den Vorgänger-Namen frisch).
+        if (prevId !== "" && prevId !== activeBackendId) {
+            var prevBackend = _backendById(prevId)
+            if (prevBackend && prevBackend.kind === "openai" && !prevBackend.cloud) {
+                var prevClient = _extraClients[prevId]
+                if (prevClient && typeof prevClient.unloadModel === "function") {
+                    prevClient.unloadModel(prevModelName, function() {})
+                }
             }
         }
         _refreshActiveCaps()

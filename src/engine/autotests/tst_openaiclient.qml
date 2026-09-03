@@ -519,9 +519,40 @@ TestCase {
         job.destroy()
     }
 
-    // ---------- Bildausgabe (Phase 5, non-streaming) ----------
+    // ---------- Unload im llama-server-Router-Modus (P-A) ----------
 
-    // OpenRouter-Bildgenerierung ist im Doku-Beispiel non-streaming:
+    // llama-server im Router-Modus entlädt ein Modell über POST /models/unload.
+    // Der Client meldet ok nur bei 2xx; Fehler sind best-effort (nie blockierend).
+    function test_unloadModelSendetRequest() {
+        var out = null
+        client.unloadModel("bonsai-27b-ternary", function(r) { out = r })
+        var c = mockHttp.last()
+        compare(c.method, "post")
+        verify(c.url.indexOf("/models/unload") !== -1)
+        compare(c.body.model, "bonsai-27b-ternary")
+        mockHttp.answer(mockHttp.calls.length - 1, { "ok": true, "data": {} })
+        verify(out.ok)
+    }
+
+    function test_unloadModelFehlerMeldetNichtBlockierend() {
+        var out = null
+        client.unloadModel("bonsai-27b-ternary", function(r) { out = r })
+        mockHttp.answer(mockHttp.calls.length - 1, { "ok": false, "status": 405, "error": "nicht verfügbar" })
+        verify(!out.ok)
+        verify(out.error !== undefined)
+    }
+
+    function test_unloadModelOhneKeyKeinHeader() {
+        client.keyRef = ""
+        var out = null
+        client.unloadModel("m", function(r) { out = r })
+        var c = mockHttp.last()
+        verify(!(c.headers && c.headers["Authorization"]))
+        mockHttp.answer(mockHttp.calls.length - 1, { "ok": true, "data": {} })
+        verify(out.ok)
+    }
+
+    // ---------- Bildausgabe (Phase 5, non-streaming) ----------
     // modalities ["image","text"], Antwort liefert message.images[].image_url.url
     // als data-URL. Der Client liefert die Liste der data-URLs zurück.
     function test_generateImageNonStreamingLiefertDataUrls() {

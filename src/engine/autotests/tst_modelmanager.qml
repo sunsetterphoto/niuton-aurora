@@ -514,6 +514,52 @@ TestCase {
         compare(mgr.activeBackendId, "openai")
     }
 
+    // Wechsel von einem llama-server-Backend (OpenAI-Client mit unloadModel)
+    // zu lokal: das alte Modell wird im Router-Modus entladen (best-effort),
+    // damit nie zwei lokale Modelle geladen bleiben. Der Test beobachtet den
+    // unloadModel-Request am mockHttp.
+    function test_wechselVonLamaServerEntlaedtRouterModell() {
+        ConfigStore.setValue("openaiEndpoint", "http://llama:8080")
+        mgr.refresh()
+        var i = mockHttp.find("http://llama:8080/v1/models")
+        mockHttp.answer(i, { "ok": true, "data": { "data": [{ "id": "bonsai-27b-ternary" }] } })
+        mgr.selectModel("openai:bonsai-27b-ternary")
+        compare(mgr.activeBackendId, "openai")
+
+        // zum lokalen Modell wechseln
+        mockHttp.calls = []
+        mgr.selectModel("local:gemma4:e4b")
+        compare(mgr.activeBackendId, "local")
+        // Der Router-Unload des Vorgängers ist gefeuert (best-effort; die
+        // Antwort darf den Wechsel nicht blockieren — hier unbeantwortet lassen).
+        var u = mockHttp.find("/models/unload")
+        verify(u !== -1, "Unload-Request fehlt")
+        compare(mockHttp.calls[u].body.model, "bonsai-27b-ternary")
+        // Der Wechsel hat trotzdem stattgefunden (kein Blockieren durch Unload)
+        compare(mgr.activeModel, "gemma4:e4b")
+    }
+
+    // Wechsel von lokal zu OpenRouter: kein Unload nötig (Cloud), aber der
+    // lokale Ollama bekommt keep_alive:0 fürs Vorgängermodell? Nur wenn vorher
+    // lokal aktiv war und es kein llama-Server war. (Bestehendes Verhalten:
+    // resolveAndLoadModel übernimmt beim Auto-Wechsel; hier nur Guard-Check.)
+    function test_wechselZuCloudLaesstLokalUnangetastet() {
+        mgr.selectModel("local:gemma4:e2b")
+        compare(mgr.activeBackendId, "local")
+        mgr.keyring = mockKeyring
+        ConfigStore.setValue("openrouterEnabled", true)
+        mgr.refresh()
+        var i = mockHttp.find("openrouter.ai/api/v1/models")
+        verify(i !== -1)
+        mockHttp.answer(i, { "ok": true, "data": { "data": [{ "id": "openrouter/free" }] } })
+        mockHttp.calls = []
+        mgr.selectModel("openrouter:openrouter/free")
+        compare(mgr.activeBackendId, "openrouter")
+        // kein /models/unload (Cloud), kein crash — lokaler Ollama bleibt (der
+        // User wechselt bewusst zur Cloud)
+        verify(mockHttp.find("/models/unload") === -1)
+    }
+
     // Das Cloud-Flag ist die Leitplanke: der Auto-Modus darf nie dorthin
     // greifen, auch wenn das Profil-Modell zufällig gleich heißt.
     function test_autoModusUeberspringtCloud() {

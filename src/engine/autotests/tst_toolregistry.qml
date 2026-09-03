@@ -81,6 +81,20 @@ Item {
             verify(defsYes.indexOf("generate_image") >= 0)     // Comfy online
         }
 
+        // generate_video erscheint nur, wenn die Cloud-Funktion im Kontext ist
+        // (videoGenFn) — die Cloud ist nie automatisch.
+        function test_videoToolNurMitCloudFn() {
+            var ctxNo = makeCtx(false)   // ohne videoGenFn
+            ctxNo.videoGenFn = undefined
+            var dNo = reg.definitions(ctxNo).map(function(d) { return d.function.name })
+            verify(dNo.indexOf("generate_video") < 0)
+            var ctxYes = makeCtx(true)
+            ctxYes.videoGenFn = function(req, cb) {}
+            var dYes = reg.definitions(ctxYes).map(function(d) { return d.function.name })
+            verify(dYes.indexOf("generate_video") >= 0)
+            compare(reg.describe("generate_video", { prompt: "x" }), "Video generieren: x")
+        }
+
         function test_executeDispatches() {
             var out = null
             reg.execute("read_file", { path: "/x" }, makeCtx(false), function(t) { out = t })

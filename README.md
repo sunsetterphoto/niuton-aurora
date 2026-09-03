@@ -28,7 +28,10 @@ your own cloud storage rank equally; a third-party cloud is the deliberate excep
 - **File attachments** via file dialog or drag & drop onto the chat — images go to
   vision-capable models, text files are inlined into the message.
 - **Image generation** via [ComfyUI](https://github.com/comfyanonymous/ComfyUI) (semantic workflow
-  templates), from a chat tool or a dedicated image panel.
+  templates), from a chat tool or a dedicated image panel; optionally an OpenRouter image model
+  (explicitly chosen, never automatic).
+- **Video generation** via OpenRouter's `/v1/videos` API (e.g. Veo 3.1 Lite, Kling) as an explicit,
+  asynchronous chat tool — the finished clip appears in the chat and opens in your default player.
 - **Voice**: speech-to-text via whisper.cpp and text-to-speech via [Piper](https://github.com/rhasspy/piper).
 - **Conversation history** in SQLite with **full-text search** (FTS5 over titles and
   message contents, with result snippets), plus a **knowledge base with RAG**: thumbs-up rated

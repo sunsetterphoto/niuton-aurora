@@ -23,6 +23,11 @@ QtObject {
     // (request, cb) mit request.prompt; cb({ok, images:[dataUrl], error}).
     // Nur gesetzt, wenn ein Bildmodell aktiv ist — die Cloud ist nie automatisch.
     property var imageGenFn: null
+    // Explizite Cloud-Videogenerierung (OpenRouter /v1/videos). Funktion
+    // (request, cb); cb({ok, started, error}). Nur gesetzt, wenn OpenRouter
+    // aktiv ist — die Cloud ist nie automatisch. Das Tool kehrt sofort zurück;
+    // die fertige MP4 hängt der AuroraController später an (appendGeneratedVideo).
+    property var videoGenFn: null
 
     // --- Kontext (Betrieb: an ModelManager gebunden; Test: gesetzt) ---
     property string activeModel: ""
@@ -142,6 +147,9 @@ QtObject {
             // Explizite Bildausgabe über ein Bildmodell (Quellenwahl im
             // generate_image-Tool): nur im Kontext, wenn der Controller sie hat.
             "genImageFn": ctl.imageGenFn,
+            // Explizite Videoausgabe (generate_video-Tool): ebenfalls nur im
+            // Kontext, wenn der Controller die Cloud-Funktion hat.
+            "videoGenFn": ctl.videoGenFn,
             // Ursprungs-Konversation für Tools, die eine spätere Zuordnung brauchen
             // (generate_image reicht sie als originConvId an ComfyClient weiter, damit
             // der onFinished-Guard tool-Bilder ebenfalls der richtigen Konversation
@@ -1038,5 +1046,19 @@ QtObject {
         chatModel.setProperty(idx, "msgId", aid)
         if (toolInitiated !== true)
             _messages.push({ "role": "assistant", "content": "[Bild generiert: " + prompt + "]", "_msgId": aid })
+    }
+
+    // Video wie Bild, aber mediaType "video/mp4" — MessageBubble rendert die
+    // MP4 als Video-Box (extern öffnen). Persistenz wie Bild (media_path/type).
+    function appendGeneratedVideo(path, prompt, toolInitiated) {
+        _appendRow({ isUser: false, ts: _nowTs(), mediaPath: path, mediaType: "video/mp4",
+                     text: "", status: "final" })
+        var idx = chatModel.count - 1
+        var aid = _persist({ "role": "assistant", "content": "[Video generiert: " + prompt + "]",
+                             "mediaPath": path, "mediaType": "video/mp4", "status": "final",
+                             "model": ctl.activeModel, "backend": ctl.isRemote ? "remote" : "local" })
+        chatModel.setProperty(idx, "msgId", aid)
+        if (toolInitiated !== true)
+            _messages.push({ "role": "assistant", "content": "[Video generiert: " + prompt + "]", "_msgId": aid })
     }
 }

@@ -156,6 +156,94 @@ QtObject {
                 cb(vec ? { "vec": vec, "model": m } : null)
             })
         }
+        // Explizite OpenRouter-Videogenerierung (eigene /v1/videos-API). Der
+        // Job läuft MINUTENLANG async — deshalb mteldet diese Funktion SOFORT
+        // "gestartet" (das Tool done ruft damit den Chat nicht auf), und der
+        // Polling-Timer unten hängt das fertige Video an, sobald es da ist.
+        videoGenFn: function(req, cb) {
+            if (!settings.openrouterEnabled || vc.baseUrl === "") {
+                if (cb) cb({ "ok": false, "error": "OpenRouter ist nicht aktiviert" })
+                return
+            }
+            var model = settings.videoGenModel
+            if (!model) {
+                if (cb) cb({ "ok": false, "error": "Kein Video-Modell gewählt" })
+                return
+            }
+            vc.submit({ "model": model, "prompt": req.prompt || "",
+                        "duration": req.duration || 6,
+                        "aspectRatio": req.aspectRatio || "16:9",
+                        "generateAudio": true }, function(r) {
+                if (!r.ok || !r.jobId) {
+                    if (cb) cb({ "ok": false, "error": r.error || "Video-Job nicht gestartet" })
+                    return
+                }
+                // async: sofort bestätigen, dann pollen
+                _videoJob = { "jobId": r.jobId, "prompt": req.prompt || "",
+                              "origin": req.originConvId || "", "n": 0 }
+                _videoTimer.start()
+                if (cb) cb({ "ok": true, "started": true, "jobId": r.jobId })
+            })
+        }
+    }
+
+    // OpenRouter-Video-Client (eigene /v1/videos-API). Nur sichtbar, wenn
+    // OpenRouter aktiviert ist; Key kommt aus dem KWallet via keyring.
+    property VideoClient _video: VideoClient {
+        id: vc
+        baseUrl: settings.openrouterEnabled ? "https://openrouter.ai/api" : ""
+        http: Http
+        keyring: Core.KeyRing
+        keyRef: "openrouter"
+    }
+
+    // Async Video-Job: Status {jobId, prompt, origin, n}; Polling alle 5 s.
+    property var _videoJob: null
+    property Timer _videoPollTimer: Timer {
+        id: _videoTimer
+        interval: 5000
+        repeat: true
+        running: false
+        onTriggered: controller._pollVideo()
+    }
+
+    function _pollVideo() {
+        if (!_videoJob) { _videoTimer.stop(); return }
+        vc.poll(_videoJob.jobId, function(r) {
+            if (!_videoJob) return   // inzwischen verworfen/abgebrochen
+            if (r.ok && r.status === "completed") {
+                _videoTimer.stop()
+                // unsigned_urls[0] ist ohne Auth ladbar -> direkt downloaden
+                var url = (r.urls && r.urls.length > 0) ? r.urls[0] : ""
+                if (url === "") { _videoJob = null; controller._transientStatus = "Video: kein Download-Link"; return }
+                var dir = FileIO.standardPath("appData") + "/videos"
+                var dest = dir + "/aurora-" + Date.now() + ".mp4"
+                Http.downloadToFile(url, dest, function(dres) {
+                    var job = _videoJob; _videoJob = null
+                    if (!dres.ok) { controller._transientStatus = "Video: Download fehlgeschlagen"; return }
+                    // origin-Guard identisch zum Bild-Weg: nur anhängen, wenn die
+                    // Konversation seit dem Start unverändert ist.
+                    if (engine.conversationId === job.origin)
+                        engine.appendGeneratedVideo(dest, job.prompt, true)
+                    controller._transientStatus = "Video fertig"
+                }, 300000)
+                return
+            }
+            if (!r.ok || r.status === "failed" || r.status === "cancelled" || r.status === "expired") {
+                _videoTimer.stop()
+                var msg = r.error || r.status || "unbekannt"
+                controller._transientStatus = "Video: " + msg
+                _videoJob = null
+                return
+            }
+            // pending/in_progress: weiter pollen; Sicherheitskappe 15 min (180×5 s)
+            if (++_videoJob.n >= 180) {
+                _videoTimer.stop()
+                controller._transientStatus = "Video: Dauert zu lange (Job läuft serverseitig weiter)"
+                _videoJob = null
+                return
+            }
+        })
     }
 
     property VoiceRecorder _vr: VoiceRecorder {

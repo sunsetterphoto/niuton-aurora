@@ -48,6 +48,22 @@ TestCase {
         b.destroy()
     }
 
+    // Video-Bubble (mediaType "video/mp4"): sichtbar, ohne dass das Image-
+    // Element versucht, die MP4 zu rendern.
+    function test_videoBubbleZeigtVideoBox() {
+        var b = bubbleComp.createObject(null, { "mediaPath": "/v.mp4", "mediaType": "video/mp4" })
+        // Die Video-Box ist sichtbar; _hasBody true (mediaPath gesetzt)
+        verify(b._hasBody)
+        b.destroy()
+    }
+
+    function test_videoOhneMediaPathUnsichtbar() {
+        var b = bubbleComp.createObject(null, { "text": "", "mediaPath": "", "mediaType": "video/mp4" })
+        // Kein mediaPath -> Video-Box unsichtbar, kein Body
+        verify(!b._hasBody)
+        b.destroy()
+    }
+
     function test_bubbleMitTextHatBody() {
         var b = bubbleComp.createObject(null, { "text": "Hallo" })
         verify(b._hasBody)

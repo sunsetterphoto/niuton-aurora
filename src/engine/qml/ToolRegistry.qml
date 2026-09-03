@@ -11,7 +11,7 @@ QtObject {
     property list<QtObject> allTools: [
         ReadFileTool {}, ListDirectoryTool {}, WriteFileTool {},
         WebSearchTool {}, WebFetchTool {}, RunCommandTool {},
-        GenerateImageTool {}
+        GenerateImageTool {}, GenerateVideoTool {}
     ]
 
     property var _activeTool: null

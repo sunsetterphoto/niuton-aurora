@@ -117,6 +117,24 @@ Item {
             compare(ctl._messages.length, before + 1)                          // manuell: in _messages
         }
 
+        // Video: gleiche Bubble-Semantik wie Bild, aber mediaType "video".
+        function test_appendGeneratedVideoAppendsAndPersists() {
+            ctl.appendGeneratedVideo("/v.mp4", "eine Welle")
+            var idx = ctl.chatModel.count - 1
+            compare(ctl.chatModel.get(idx).mediaPath, "/v.mp4")
+            compare(ctl.chatModel.get(idx).mediaType, "video/mp4")
+            var found = false
+            for (var i = 0; i < storeMock.appended.length; i++)
+                if (storeMock.appended[i].mediaPath === "/v.mp4") found = true
+            verify(found)
+        }
+        function test_toolVideoNotPushedToApiHistory() {
+            var before = ctl._messages.length
+            ctl.appendGeneratedVideo("/t.mp4", "x", true)
+            compare(ctl._messages.length, before)                              // NICHT in _messages
+            compare(ctl.chatModel.get(ctl.chatModel.count - 1).mediaPath, "/t.mp4")
+        }
+
         // Persistenz-Spur (toolActivity-Reload): der Zug schreibt tool_calls-
         // Zeilen (appendToolCall pending) und aktualisiert sie über den Lauf
         // (running -> ok mit finishedAt + resultMessageId, gleiche dbId).

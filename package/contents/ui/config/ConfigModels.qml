@@ -318,6 +318,26 @@ KCM.SimpleKCM {
             Layout.maximumWidth: Kirigami.Units.gridUnit * 25
         }
 
+        RowLayout {
+            visible: openrouterEnabledBox.checked
+            Kirigami.FormData.label: "Video-Modell:"
+            QQC2.TextField {
+                id: videoGenModelField
+                Layout.fillWidth: true
+                placeholderText: "google/veo-3.1-lite"
+                text: (ConfigStore.revision, ConfigStore.value("videoGenModel"))
+                onEditingFinished: ConfigStore.setValue("videoGenModel", text.trim())
+            }
+        }
+
+        QQC2.Label {
+            visible: openrouterEnabledBox.checked
+            text: "Für Videogenerierung (generate_video). Leer = deaktiviert. Verfügbare Modelle: /v1/videos/models (z. B. google/veo-3.1-lite, kwaivgi/kling-v3.0-std)."
+            wrapMode: Text.Wrap
+            opacity: 0.6
+            Layout.maximumWidth: Kirigami.Units.gridUnit * 25
+        }
+
         Kirigami.Separator {
             Kirigami.FormData.isSection: true
             Kirigami.FormData.label: "Bildgenerierung (ComfyUI)"

@@ -269,7 +269,7 @@ Item {
 
                 // Generiertes/angehängtes Bild
                 Image {
-                    visible: bubble.mediaPath !== ""
+                    visible: bubble.mediaPath !== "" && bubble.mediaType.indexOf("video") === -1
                     source: bubble.mediaPath !== "" ? "file://" + bubble.mediaPath : ""
                     width: Math.min(implicitWidth > 0 ? implicitWidth : parent.width, parent.width)
                     fillMode: Image.PreserveAspectFit
@@ -277,6 +277,40 @@ Item {
 
                     TapHandler {
                         onTapped: Qt.openUrlExternally("file://" + bubble.mediaPath)
+                    }
+                }
+
+                // Generiertes VIDEO: keine neue QtMultimedia-Abhängigkeit — eine
+                // Klick-Box, die die MP4 im Standard-Player öffnet (wie die
+                // Bild-Bubble per Tap). Der Inhalt bleibt lokal auf der Platte.
+                Rectangle {
+                    visible: bubble.mediaPath !== "" && bubble.mediaType.indexOf("video") !== -1
+                    width: parent.width
+                    height: Kirigami.Units.gridUnit * 3
+                    radius: Kirigami.Units.smallSpacing
+                    color: Theme.withAlpha(Kirigami.Theme.neutralTextColor, 0.1)
+
+                    RowLayout {
+                        anchors.fill: parent
+                        anchors.margins: Kirigami.Units.smallSpacing
+                        spacing: Kirigami.Units.smallSpacing
+
+                        Kirigami.Icon {
+                            source: "video-x-generic"
+                            Layout.preferredWidth: Kirigami.Units.iconSizes.medium
+                            Layout.preferredHeight: Kirigami.Units.iconSizes.medium
+                        }
+
+                        QQC2.Label {
+                            text: "Video öffnen"
+                            color: Kirigami.Theme.linkColor
+                            Layout.fillWidth: true
+                            elide: Text.ElideRight
+                        }
+                    }
+                    MouseArea {
+                        anchors.fill: parent
+                        onClicked: Qt.openUrlExternally("file://" + bubble.mediaPath)
                     }
                 }
 

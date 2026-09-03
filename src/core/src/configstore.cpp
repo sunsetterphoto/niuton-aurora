@@ -53,6 +53,10 @@ const QVariantMap &ConfigStore::defaults()
         // Vom Nutzer gepinnte Cloud-Modelle (JSON-Array der IDs). Leer = die
         // Engine fällt auf das freie Startset zurück (OpenRouterFreeStart).
         { QStringLiteral("openrouterFavorites"),    QStringLiteral("[]") },
+        // OpenRouter-Video-Generierung: Modell als Default (billig, mit Audio-
+        // 720p-Option). Frei wählbar in den Modell-Einstellungen; leere Auswahl
+        // deaktiviert den Video-Pfad.
+        { QStringLiteral("videoGenModel"),          QStringLiteral("google/veo-3.1-lite") },
         { QStringLiteral("embedModel"),             QStringLiteral("nomic-embed-text") },
         { QStringLiteral("ragEnabled"),             true },
         { QStringLiteral("ragTopK"),                3 },

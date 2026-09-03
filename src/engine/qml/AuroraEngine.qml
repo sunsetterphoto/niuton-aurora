@@ -17,6 +17,9 @@ QtObject {
     // Explizite Cloud-Bildgenerierung (vom AuroraController gesetzt); reicht
     // an den ChatController für ctx.genImageFn (Quellenwahl im Tool).
     property var imageGenFn: null
+    // Explizite Cloud-Videogenerierung (OpenRouter /v1/videos); reicht an den
+    // ChatController für ctx.videoGenFn (generate_video-Tool).
+    property var videoGenFn: null
     property string homeDir: ""
     property bool thinkingEnabled: false
 
@@ -38,6 +41,7 @@ QtObject {
         resolver: engine.resolver; grants: engine.grants; comfy: engine.comfy
         chatFn: engine.chatFn; embedFn: engine.embedFn; homeDir: engine.homeDir; thinkingEnabled: engine.thinkingEnabled
         imageGenFn: engine.imageGenFn
+        videoGenFn: engine.videoGenFn
         activeModel: engine.modelManager ? engine.modelManager.activeModel : ""
         activeCaps: engine.modelManager ? engine.modelManager.activeCaps : []
         isRemote: engine.modelManager ? engine.modelManager.isRemote : false
@@ -57,6 +61,7 @@ QtObject {
     function newConversation() { _ctl.newConversation() }
     function loadConversation(id) { _ctl.loadConversation(id) }
     function appendGeneratedImage(p, t, toolInitiated) { _ctl.appendGeneratedImage(p, t, toolInitiated) }
+    function appendGeneratedVideo(p, t, toolInitiated) { _ctl.appendGeneratedVideo(p, t, toolInitiated) }
     function rateMessage(msgId, rating) { _ctl.rateMessage(msgId, rating) }
     function stripRagSource(rowMsgId, sourceId) { _ctl.stripRagSource(rowMsgId, sourceId) }
 

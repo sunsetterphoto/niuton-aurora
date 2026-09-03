@@ -27,6 +27,8 @@ QtObject {
     property string modelPerformance: ConfigStore.value("modelPerformance")
     property string lastSelectedModel: ConfigStore.value("lastSelectedModel")
     property string embedModel: ConfigStore.value("embedModel")
+    // OpenRouter-Video-Generierung: Default-Modell (Veo 3.1 Lite); leer deaktiviert.
+    property string videoGenModel: ConfigStore.value("videoGenModel")
     // Vom Nutzer gepinnte OpenRouter-Modelle (Array der IDs). Leer = die
     // Engine nutzt das freie Startset (OpenRouterFreeStart).
     property var openrouterFavorites: _parseFavorites()
@@ -122,6 +124,7 @@ QtObject {
         modelPerformance = ConfigStore.value("modelPerformance")
         lastSelectedModel = ConfigStore.value("lastSelectedModel")
         embedModel = ConfigStore.value("embedModel")
+        videoGenModel = ConfigStore.value("videoGenModel")
         openrouterFavorites = _parseFavorites()
         ragEnabled = ConfigStore.value("ragEnabled")
         ragTopK = ConfigStore.value("ragTopK")

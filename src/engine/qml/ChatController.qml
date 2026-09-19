@@ -19,6 +19,9 @@ QtObject {
     property var http: (typeof Http !== "undefined") ? Http : null
     property var chatFn: null                 // function(request) -> ChatJob
     property var embedFn: null                // function(input, cb) -> cb({vec, model} | null)
+    // Routinen-Scheduler (geteilt mit allen Engines): ctx.routines für das
+    // manage_routines-Tool. Nur im Kontext, wenn injiziert — schlanke Test-
+    // Mocks bleiben ohne.
     // Explizite Cloud-Bildgenerierung (OpenRouter-Bildmodell). Funktion
     // (request, cb) mit request.prompt; cb({ok, images:[dataUrl], error}).
     // Nur gesetzt, wenn ein Bildmodell aktiv ist — die Cloud ist nie automatisch.
@@ -33,6 +36,8 @@ QtObject {
     // error}). Streaming-Job: Tool bestätigt sofort, fertige WAV spielt der
     // Controller ab (pointer).
     property var audioGenFn: null
+    // Geteilter RoutineScheduler: über ctx an manage_routines durchgereicht.
+    property var routines: null
 
     // --- Kontext (Betrieb: an ModelManager gebunden; Test: gesetzt) ---
     property string activeModel: ""
@@ -167,6 +172,9 @@ QtObject {
             // Explizite Audioausgabe (generate_audio-Tool): nur im Kontext,
             // wenn der Controller die Cloud-Funktion hat.
             "audioGenFn": ctl.audioGenFn,
+            // Routinen-Verwaltung (manage_routines-Tool): der geteilte
+            // Scheduler — nur im Kontext, wenn injiziert.
+            "routines": ctl.routines,
             // Ursprungs-Konversation für Tools, die eine spätere Zuordnung brauchen
             // (generate_image reicht sie als originConvId an ComfyClient weiter, damit
             // der onFinished-Guard tool-Bilder ebenfalls der richtigen Konversation

@@ -100,6 +100,18 @@ QString extraToJson(const QVariant &extra)
     return s.isEmpty() ? QStringLiteral("{}") : s;
 }
 
+// ms-Epoch-Spalten (routines.next_run/last_run): 0/negativ/fehlt -> SQL-NULL
+// ("ungeplant"), sonst qlonglong. Ein QML-seitiges nextRun=0 ist also der
+// definierte Weg, einen Lauf abzuhängen.
+QVariant msOrNull(const QVariant &v)
+{
+    bool ok = false;
+    const qlonglong ms = v.toLongLong(&ok);
+    if (!ok || ms <= 0)
+        return QVariant(QMetaType(QMetaType::LongLong));
+    return ms;
+}
+
 QVariantMap jsonToMap(const QString &json)
 {
     const QJsonDocument doc = QJsonDocument::fromJson(json.toUtf8());
@@ -175,8 +187,8 @@ bool migrate(QSqlDatabase &db, QString *error)
         return false;
     }
     const int version = q.value(0).toInt();
-    if (version > 5) {
-        if (error) *error = QStringLiteral("Datenbank hat Schema-Version %1 — diese Aurora-Version kennt nur 5 (DB von neuerer Version?)").arg(version);
+    if (version > 6) {
+        if (error) *error = QStringLiteral("Datenbank hat Schema-Version %1 — diese Aurora-Version kennt nur 6 (DB von neuerer Version?)").arg(version);
         q.exec(QStringLiteral("ROLLBACK"));
         return false;
     }
@@ -339,6 +351,44 @@ bool migrate(QSqlDatabase &db, QString *error)
         }
     }
 
+    // Migration 5 -> 6: routines-Tabelle (geplante Selbstläufe). Zeitangaben in
+    // Lokalzeit (time_of_day "HH:MM", weekday 0=Montag); next_run/last_run als
+    // ms-Epoch (NULLbar, 0 = ungeplant). claim_token macht das Fordern fälliger
+    // Routinen atomar — Widget und App können parallel laufen, ohne Doppel-Ausführung.
+    if (version < 6) {
+        const QStringList ddlV6 = {
+            QStringLiteral(
+                "CREATE TABLE routines ("
+                " id                 TEXT PRIMARY KEY,"
+                " title              TEXT NOT NULL DEFAULT '',"
+                " prompt             TEXT NOT NULL DEFAULT '',"
+                " kind               TEXT NOT NULL DEFAULT 'daily'"
+                "  CHECK (kind IN ('daily','weekly','interval','once')),"
+                " time_of_day        TEXT NOT NULL DEFAULT '',"
+                " weekday            INTEGER NOT NULL DEFAULT 0,"
+                " interval_minutes   INTEGER NOT NULL DEFAULT 60,"
+                " enabled            INTEGER NOT NULL DEFAULT 1,"
+                " next_run           INTEGER,"
+                " last_run           INTEGER,"
+                " last_status        TEXT NOT NULL DEFAULT ''"
+                "  CHECK (last_status IN ('','idle','ok','error','running')),"
+                " last_conversation  TEXT NOT NULL DEFAULT '',"
+                " claim_token        TEXT NOT NULL DEFAULT '',"
+                " created_at         TEXT NOT NULL,"
+                " updated_at         TEXT NOT NULL,"
+                " extra              TEXT NOT NULL DEFAULT '{}')"),
+            QStringLiteral("CREATE INDEX idx_routines_next ON routines(enabled, next_run)"),
+            QStringLiteral("PRAGMA user_version = 6"),
+        };
+        for (const QString &stmt : ddlV6) {
+            if (!q.exec(stmt)) {
+                if (error) *error = q.lastError().text();
+                q.exec(QStringLiteral("ROLLBACK"));
+                return false;
+            }
+        }
+    }
+
     if (!q.exec(QStringLiteral("COMMIT"))) {
         if (error) *error = q.lastError().text();
         return false;
@@ -348,11 +398,21 @@ bool migrate(QSqlDatabase &db, QString *error)
 
 // Task 2: freistehender Helfer im anonymen Namespace, beim open() aufgerufen.
 // Task 3 verdrahtet zusätzlich die Q_INVOKABLE-Variante (sweepNonFinal()).
+// Routines: ein bei Absturz/Prozessende hängen gebliebener Lauf (last_status
+// 'running') wird freigeegeben und neu bewaffnet — next_run in der Vergangenheit
+// führt beim nächsten claimRoutines sofort zur Nachhol-Ausführung (genau EINMAL,
+// kein Catch-up-Rückstand).
 bool sweepOnOpen(QSqlDatabase &db, QString *error)
 {
     QSqlQuery q(db);
     if (!q.exec(QStringLiteral(
             "UPDATE tool_calls SET status='aborted' WHERE status IN ('pending','running')"))) {
+        if (error) *error = q.lastError().text();
+        return false;
+    }
+    if (!q.exec(QStringLiteral(
+            "UPDATE routines SET last_status='idle', claim_token='' "
+            "WHERE last_status='running' OR claim_token != ''"))) {
         if (error) *error = q.lastError().text();
         return false;
     }
@@ -414,6 +474,10 @@ public Q_SLOTS:
                     d.removeRecursively();
                 m_pendingDirDelete.clear();
             }
+            // Geforderte Routinen vor completed() melden — der Scheduler startet
+            // den Lauf und erwartet die Liste so früh wie möglich.
+            if (op == QLatin1String("claimRoutines"))
+                Q_EMIT claimed(m_claimed);
             Q_EMIT completed(op);
         } else {
             if (error.isEmpty()) error = q.lastError().text();
@@ -426,6 +490,8 @@ public Q_SLOTS:
 Q_SIGNALS:
     void completed(const QString &op);
     void failed(const QString &op, const QString &error);
+    // claimRoutines: die in diesem Takt geforderten (atomar markierten) Routinen.
+    void claimed(const QVariantList &rows);
 
 private:
     bool ensureDb(QString *error)
@@ -441,13 +507,16 @@ private:
         return applyPragmas(db, error);
     }
 
-    bool execOp(QSqlDatabase &db, const QString &op, const QVariantMap &a, QString *error);
+    bool execOp(QSqlDatabase &db, const QString &op, const QVariantMap &args, QString *error);
 
     QString m_dbPath;
     const QString m_connName;
     // Von execOp (deleteConversation) vorgemerkter Attachment-Ordner; wird in
     // exec() erst nach erfolgreichem COMMIT gelöscht, bei ROLLBACK verworfen.
     QString m_pendingDirDelete;
+    // Von execOp (claimRoutines) gefüllte Trefferliste; in exec() nach COMMIT
+    // über claimed() gemeldet.
+    QVariantList m_claimed;
 };
 
 bool StoreWorker::execOp(QSqlDatabase &db, const QString &op, const QVariantMap &a, QString *error)
@@ -778,6 +847,124 @@ bool StoreWorker::execOp(QSqlDatabase &db, const QString &op, const QVariantMap 
             ? true : fail(q);
     }
 
+    // ------------------------------------------------------------------ routines
+    if (op == QLatin1String("addRoutine")) {
+        q.prepare(QStringLiteral(
+            "INSERT INTO routines(id, title, prompt, kind, time_of_day, weekday,"
+            " interval_minutes, enabled, next_run, last_run, last_status, last_conversation,"
+            " created_at, updated_at) "
+            "VALUES(:id, :title, :prompt, :kind, :time, :weekday, :interval, :enabled,"
+            " :next, :last, :status, :conv, :now, :now)"));
+        q.bindValue(QStringLiteral(":id"), textOrEmpty(a.value(QStringLiteral("id"))));
+        q.bindValue(QStringLiteral(":title"), textOrEmpty(a.value(QStringLiteral("title"))));
+        q.bindValue(QStringLiteral(":prompt"), textOrEmpty(a.value(QStringLiteral("prompt"))));
+        q.bindValue(QStringLiteral(":kind"), textOrEmpty(a.value(QStringLiteral("kind"), QStringLiteral("daily"))));
+        q.bindValue(QStringLiteral(":time"), textOrEmpty(a.value(QStringLiteral("timeOfDay"))));
+        q.bindValue(QStringLiteral(":weekday"), a.value(QStringLiteral("weekday"), 0).toInt());
+        q.bindValue(QStringLiteral(":interval"), a.value(QStringLiteral("intervalMinutes"), 60).toInt());
+        q.bindValue(QStringLiteral(":enabled"), a.value(QStringLiteral("enabled"), true).toBool() ? 1 : 0);
+        q.bindValue(QStringLiteral(":next"), msOrNull(a.value(QStringLiteral("nextRun"))));
+        q.bindValue(QStringLiteral(":last"), msOrNull(a.value(QStringLiteral("lastRun"))));
+        q.bindValue(QStringLiteral(":status"), textOrEmpty(a.value(QStringLiteral("lastStatus"))));
+        q.bindValue(QStringLiteral(":conv"), textOrEmpty(a.value(QStringLiteral("lastConversation"))));
+        q.bindValue(QStringLiteral(":now"), now);
+        return q.exec() ? true : fail(q);
+    }
+
+    if (op == QLatin1String("updateRoutine")) {
+        // Whitelist inkl. Scheduler-Buchhaltung (nextRun/lastRun/lastStatus/
+        // lastConversation/claimToken) — der Scheduler schreibt dieselbe Spur,
+        // die die UI liest. updated_at wird immer aktualisiert.
+        static const QMap<QString, QString> spalteRoutine = {
+            {QStringLiteral("title"), QStringLiteral("title")},
+            {QStringLiteral("prompt"), QStringLiteral("prompt")},
+            {QStringLiteral("kind"), QStringLiteral("kind")},
+            {QStringLiteral("timeOfDay"), QStringLiteral("time_of_day")},
+            {QStringLiteral("weekday"), QStringLiteral("weekday")},
+            {QStringLiteral("intervalMinutes"), QStringLiteral("interval_minutes")},
+            {QStringLiteral("enabled"), QStringLiteral("enabled")},
+            {QStringLiteral("nextRun"), QStringLiteral("next_run")},
+            {QStringLiteral("lastRun"), QStringLiteral("last_run")},
+            {QStringLiteral("lastStatus"), QStringLiteral("last_status")},
+            {QStringLiteral("lastConversation"), QStringLiteral("last_conversation")},
+            {QStringLiteral("claimToken"), QStringLiteral("claim_token")},
+        };
+        QStringList sets;
+        for (auto it = spalteRoutine.constBegin(); it != spalteRoutine.constEnd(); ++it) {
+            if (a.contains(it.key()))
+                sets << QString(it.value() + QStringLiteral(" = :") + it.key());
+        }
+        if (sets.isEmpty()) {
+            if (error) *error = QStringLiteral("updateRoutine: keine erlaubten Felder");
+            return false;
+        }
+        sets << QStringLiteral("updated_at = :now");
+        q.prepare(QStringLiteral("UPDATE routines SET ") + sets.join(QStringLiteral(", "))
+                  + QStringLiteral(" WHERE id = :id"));
+        for (auto it = spalteRoutine.constBegin(); it != spalteRoutine.constEnd(); ++it) {
+            if (!a.contains(it.key())) continue;
+            const QString ph = QString(QStringLiteral(":") + it.key());
+            if (it.key() == QLatin1String("nextRun") || it.key() == QLatin1String("lastRun"))
+                q.bindValue(ph, msOrNull(a.value(it.key())));
+            else if (it.key() == QLatin1String("enabled"))
+                q.bindValue(ph, a.value(it.key()).toBool() ? 1 : 0);
+            else if (it.key() == QLatin1String("weekday") || it.key() == QLatin1String("intervalMinutes"))
+                q.bindValue(ph, a.value(it.key()).toInt());
+            else
+                q.bindValue(ph, textOrEmpty(a.value(it.key())));
+        }
+        q.bindValue(QStringLiteral(":now"), now);
+        q.bindValue(QStringLiteral(":id"), textOrEmpty(a.value(QStringLiteral("id"))));
+        return execIdOp();
+    }
+
+    if (op == QLatin1String("deleteRoutine")) {
+        q.prepare(QStringLiteral("DELETE FROM routines WHERE id = :id"));
+        q.bindValue(QStringLiteral(":id"), textOrEmpty(a.value(QStringLiteral("id"))));
+        return execIdOp();
+    }
+
+    // Atomares Fordern fälliger Routinen (Scheduler-Takt). Das UPDATE setzt die
+    // Claim-Marke in derselben Transaktion, in der die Treffer gelesen werden —
+    // zwei Aurora-Instanzen (Widget + App) können sich so keinen Lauf doppelt
+    // holen: der zweite Prozess sieht die Zeilen bereits 'running' mit fremdem
+    // Token. nichts-fällig ist ERFOLG (leere Liste), kein Fehler.
+    if (op == QLatin1String("claimRoutines")) {
+        const QString token = textOrEmpty(a.value(QStringLiteral("token")));
+        // WICHTIG: next_run/last_run sind INTEGER (ms-Epoch) — die Fälligkeits-
+        // Prüfung bindet deshalb nowMs als Zahl. Der isoNow()-String wäre als
+        // :now größer als JEDE Ganzzahl (SQLite-Typenordnung) und würde jede
+        // ungeplante/unfällige Zeile mitfassen.
+        const qlonglong nowMs = a.value(QStringLiteral("now")).toLongLong();
+        q.prepare(QStringLiteral(
+            "UPDATE routines SET claim_token = :token, last_status = 'running',"
+            " last_run = :now_ms, updated_at = :now "
+            "WHERE enabled = 1 AND last_status != 'running' AND claim_token = ''"
+            " AND next_run IS NOT NULL AND next_run <= :now_ms"));
+        q.bindValue(QStringLiteral(":token"), token);
+        q.bindValue(QStringLiteral(":now_ms"), nowMs);
+        q.bindValue(QStringLiteral(":now"), now);
+        if (!q.exec()) return fail(q);
+        m_claimed.clear();
+        q.prepare(QStringLiteral(
+            "SELECT id, title, prompt, kind, time_of_day, weekday, interval_minutes "
+            "FROM routines WHERE claim_token = :token ORDER BY next_run"));
+        q.bindValue(QStringLiteral(":token"), token);
+        if (!q.exec()) return fail(q);
+        while (q.next()) {
+            m_claimed.append(QVariantMap{
+                {QStringLiteral("id"), q.value(0).toString()},
+                {QStringLiteral("title"), q.value(1).toString()},
+                {QStringLiteral("prompt"), q.value(2).toString()},
+                {QStringLiteral("kind"), q.value(3).toString()},
+                {QStringLiteral("timeOfDay"), q.value(4).toString()},
+                {QStringLiteral("weekday"), q.value(5).toInt()},
+                {QStringLiteral("intervalMinutes"), q.value(6).toInt()},
+            });
+        }
+        return true;
+    }
+
     if (error) *error = QStringLiteral("Unbekannte Operation: %1").arg(op);
     return false;
 }
@@ -877,6 +1064,7 @@ QVariantMap ConversationStore::open()
     connect(this, &ConversationStore::opRequested, m_worker, &StoreWorker::exec);
     connect(m_worker, &StoreWorker::completed, this, &ConversationStore::writeCompleted);
     connect(m_worker, &StoreWorker::failed, this, &ConversationStore::writeFailed);
+    connect(m_worker, &StoreWorker::claimed, this, &ConversationStore::routinesClaimed);
     m_thread.start();
 
     m_ready = true;
@@ -1318,6 +1506,45 @@ QString ConversationStore::latestConversationId() const
     return q.value(0).toString();
 }
 
+// Alle Routinen (Scheduler-/UI-Modell). Fällige zuerst, ungeplante (next_run
+// NULL) zuletzt, dann nach Anlagezeit — deterministische Reihenfolge für
+// Sidebar und Abarbeitung.
+QVariantList ConversationStore::routines() const
+{
+    QVariantList out;
+    if (!m_ready) return out;
+    QSqlQuery q(QSqlDatabase::database(m_readConn));
+    q.prepare(QStringLiteral(
+        "SELECT id, title, prompt, kind, time_of_day, weekday, interval_minutes,"
+        " enabled, next_run, last_run, last_status, last_conversation, created_at, updated_at "
+        "FROM routines "
+        "ORDER BY (next_run IS NULL), next_run, created_at"));
+    if (!q.exec()) {
+        Q_EMIT const_cast<ConversationStore *>(this)->readFailed(
+            QStringLiteral("routines"), q.lastError().text());
+        return out;
+    }
+    while (q.next()) {
+        out.append(QVariantMap{
+            {QStringLiteral("id"), q.value(0).toString()},
+            {QStringLiteral("title"), q.value(1).toString()},
+            {QStringLiteral("prompt"), q.value(2).toString()},
+            {QStringLiteral("kind"), q.value(3).toString()},
+            {QStringLiteral("timeOfDay"), q.value(4).toString()},
+            {QStringLiteral("weekday"), q.value(5).toInt()},
+            {QStringLiteral("intervalMinutes"), q.value(6).toInt()},
+            {QStringLiteral("enabled"), q.value(7).toInt() != 0},
+            {QStringLiteral("nextRun"), qlonglong(q.value(8).toLongLong())},
+            {QStringLiteral("lastRun"), qlonglong(q.value(9).toLongLong())},
+            {QStringLiteral("lastStatus"), q.value(10).toString()},
+            {QStringLiteral("lastConversation"), q.value(11).toString()},
+            {QStringLiteral("createdAt"), q.value(12).toString()},
+            {QStringLiteral("updatedAt"), q.value(13).toString()},
+        });
+    }
+    return out;
+}
+
 void ConversationStore::enqueue(const QString &op, const QVariantMap &args)
 {
     if (!m_ready) {
@@ -1414,6 +1641,33 @@ void ConversationStore::updateToolCall(const QString &id, const QVariantMap &fie
 void ConversationStore::sweepNonFinal()
 {
     enqueue(QStringLiteral("sweepNonFinal"), {});
+}
+
+// ------------------------------------------------------------------ routines
+void ConversationStore::addRoutine(const QVariantMap &fields)
+{
+    enqueue(QStringLiteral("addRoutine"), fields);
+}
+
+void ConversationStore::updateRoutine(const QString &id, const QVariantMap &fields)
+{
+    QVariantMap a = fields;
+    a.insert(QStringLiteral("id"), id);
+    enqueue(QStringLiteral("updateRoutine"), a);
+}
+
+void ConversationStore::deleteRoutine(const QString &id)
+{
+    enqueue(QStringLiteral("deleteRoutine"), {{QStringLiteral("id"), id}});
+}
+
+void ConversationStore::claimRoutines(qlonglong nowMs)
+{
+    // Token pro Aufruf: das UPDATE markiert nur noch nicht markierte Zeilen mit
+    // DIESEM Token, die danach gelesene Trefferliste gehört also genau diesem Takt.
+    enqueue(QStringLiteral("claimRoutines"),
+            {{QStringLiteral("token"), QUuid::createUuid().toString(QUuid::WithoutBraces)},
+             {QStringLiteral("now"), nowMs}});
 }
 
 #include "conversationstore.moc"

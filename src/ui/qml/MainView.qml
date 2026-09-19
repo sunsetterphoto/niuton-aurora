@@ -83,15 +83,25 @@ ColumnLayout {
             Layout.fillHeight: true
             visible: root._sidebarOpen
 
+            routines: root.controller.routineList
+            runningRoutineId: root.controller.runningRoutineId
+            routinesOpen: root.controller.routinesOpen
             conversations: root.controller.conversationList
             currentId: root.controller.conversationId
             canNewChat: true
+            chatsOpen: root.controller.chatsOpen
             searchResults: root.controller.searchResults
 
             onNewChatRequested: root.controller.newConversation()
             onLoadRequested: function(convId) { root.controller.loadConversation(convId) }
             onDeleteRequested: function(convId) { root.controller.deleteConversation(convId) }
             onSearchRequested: function(text) { root.controller.searchConversations(text) }
+            onRoutinesToggleRequested: function(on) { root.controller.setRoutinesOpen(on) }
+            onChatsToggleRequested: function(on) { root.controller.setChatsOpen(on) }
+            onRoutineAddRequested: routineDialog.openFor(null)
+            onRoutineEditRequested: function(routine) { routineDialog.openFor(routine) }
+            onRoutineDeleteRequested: function(id) { root.controller.deleteRoutine(id) }
+            onRoutineRunRequested: function(id) { root.controller.runRoutineNow(id) }
 
             Behavior on Layout.preferredWidth { NumberAnimation { duration: 150 } }
         }
@@ -212,5 +222,23 @@ ColumnLayout {
                 onCloseRequested: root.controller.setImageMode(false)
             }
         }
+    }
+
+    // Routinen-Dialog als Overlay über der gesamten View (kein fensterbasiertes
+    // Dialog — im Widget-Popup könnte ein eigenes Fenster hinter dem Popup
+    // landen). anchored Fill auf einer ColumnLayout ist erlaubt (das Item
+    // nimmt an Layout nichts teil).
+    RoutineDialog {
+        id: routineDialog
+        anchors.fill: parent
+        visible: false
+
+        onSaved: function(fields) {
+            if (fields.id !== undefined && fields.id !== "")
+                root.controller.updateRoutine(fields.id, fields)
+            else
+                root.controller.addRoutine(fields)
+        }
+        onRunRequested: function(id) { root.controller.runRoutineNow(id) }
     }
 }

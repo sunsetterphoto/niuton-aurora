@@ -23,6 +23,9 @@ QtObject {
     // Explizite Cloud-Audiogenerierung; reicht an den ChatController für
     // ctx.audioGenFn (generate_audio-Tool).
     property var audioGenFn: null
+    // Geteilter RoutineScheduler: ctx.routines für manage_routines. null = Tool
+    // fehlt im Kontext (schlanke Test-Mocks).
+    property var routines: null
     property string homeDir: ""
     property bool thinkingEnabled: false
 
@@ -51,6 +54,7 @@ QtObject {
         imageGenFn: engine.imageGenFn
         videoGenFn: engine.videoGenFn
         audioGenFn: engine.audioGenFn
+        routines: engine.routines
         activeModel: engine.modelManager ? engine.modelManager.activeModel : ""
         activeCaps: engine.modelManager ? engine.modelManager.activeCaps : []
         isRemote: engine.modelManager ? engine.modelManager.isRemote : false

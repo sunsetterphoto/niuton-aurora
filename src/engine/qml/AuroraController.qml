@@ -103,6 +103,26 @@ QtObject {
     property var manualEntries: []
     property bool knowledgeOpen: false
 
+    // ==================== Routinen (Scheduler + Sidebar-Modell) ====================
+    property var routineList: routineScheduler.routineList
+    readonly property string runningRoutineId: routineScheduler.activeRunId
+    // Sidebar-Sektionen (Routinen oberhalb der Chats): E/A-klappbar, Zustand
+    // über den ConfigStore persistiert.
+    property bool routinesOpen: ConfigStore.value("routinesOpen") !== false
+    property bool chatsOpen: ConfigStore.value("chatsOpen") !== false
+    function setRoutinesOpen(on) {
+        routinesOpen = on
+        settings.requestPersist("routinesOpen", on)
+    }
+    function setChatsOpen(on) {
+        chatsOpen = on
+        settings.requestPersist("chatsOpen", on)
+    }
+    function addRoutine(f) { return routineScheduler.createRoutine(f) }
+    function updateRoutine(id, f) { return routineScheduler.updateRoutine(id, f) }
+    function deleteRoutine(id) { return routineScheduler.deleteRoutine(id) }
+    function runRoutineNow(id) { return routineScheduler.runNow(id) }
+
     // ==================== Signale ====================
     // Der Host verdrahtet dies auf chatView.insertTranscript() (Parent->Child).
     signal transcriptReady(string text)
@@ -129,6 +149,7 @@ QtObject {
         thinkingEnabled: controller.thinkingEnabled
         reasoningEffort: controller.reasoningEffort
         chatFn: function(req) { return modelManager.chat(req) }
+        routines: routineScheduler
         // Explizite Bildausgabe über ein OpenRouter-Bildmodell: der Weg ist
         // dem ComfyUI-Pfad nachempfunden (Ausgabe in dieselbe Chat-Blase über
         // appendGeneratedImage, conversationId-Guard gegen falsche Zuordnung).
@@ -246,6 +267,88 @@ QtObject {
         http: Http
         keyring: Core.KeyRing
         keyRef: "openrouter"
+    }
+
+    // ==================== Routinen-Scheduler ====================
+    // Eigene AuroraEngine-Instanz: Läufe stören keinen offenen UI-Chat und
+    // umgekehrt. Die Bild/Audio-Funktionen unten spiegeln die des UI-Engine,
+    // mit origin-Guard auf DIESE Engine (Ergebnis-Blasen landen in der
+    // Routine-Konversation, nicht in der gerade geöffneten). Cloud-Video bleibt
+    // bewusst außen vor (asynchroner Polling-Pfad hängt am UI-Controller) —
+    // das Tool blendet sich im Routine-Kontext einfach aus.
+    property RoutineScheduler _routines: RoutineScheduler {
+        id: routineScheduler
+        store: ConversationStore
+        modelManager: modelManager
+        registry: toolRegistry
+        settings: settings
+        comfy: comfyClient
+        homeDir: FileIO.standardPath("home")
+        chatFn: function(req) { return modelManager.chat(req) }
+        embedFn: function(input, cb) {
+            var m = settings.embedModel
+            modelManager.embed(m, input, function(vec) {
+                cb(vec ? { "vec": vec, "model": m } : null)
+            })
+        }
+        imageGenFn: function(req, cb) {
+            modelManager.generateImage(req, function(r) {
+                if (!r.ok || r.images.length === 0) { if (cb) cb(r); return }
+                var dir = FileIO.standardPath("appData") + "/images"
+                var n = 0
+                var paths = []
+                for (var i = 0; i < r.images.length; i++) {
+                    var url = r.images[i]
+                    var komma = url.indexOf(",")
+                    if (komma < 0) continue
+                    var mime = url.substring(5, komma).split(";")[0] // "image/png"
+                    var ext = (mime === "image/jpeg") ? "jpg"
+                            : (mime === "image/webp") ? "webp" : "png"
+                    var dest = dir + "/aurora-" + Date.now() + "-" + (n++) + "." + ext
+                    var w = FileIO.writeBase64(dest, url.substring(komma + 1))
+                    if (w.ok) paths.push(dest)
+                }
+                var ok = paths.length > 0
+                if (ok) {
+                    var origin = req.originConvId || ""
+                    // origin-Guard auf die Routine-Engine (Parität zum UI-Engine)
+                    if (routineScheduler._engine.conversationId === origin)
+                        for (var p = 0; p < paths.length; p++)
+                            routineScheduler._engine.appendGeneratedImage(paths[p], req.prompt, true)
+                }
+                if (cb) cb({ "ok": ok, "images": paths,
+                             "error": ok ? "" : "Cloud-Bilder konnten nicht gespeichert werden" })
+            })
+        }
+        audioGenFn: function(req, cb) {
+            if (!settings.openrouterEnabled || ac.baseUrl === "") {
+                if (cb) cb({ "ok": false, "error": "OpenRouter ist nicht aktiviert" })
+                return
+            }
+            if (!req || !req.prompt) {
+                if (cb) cb({ "ok": false, "error": "Kein Audio-Prompt" })
+                return
+            }
+            var origin = req.originConvId || ""
+            ac.generate(req.prompt, { "voice": "alloy", "format": "wav" }, function(r) {
+                if (!r.ok || r.wavBase64 === "") {
+                    if (cb) cb({ "ok": false, "error": r.error || "Kein Audio erhalten" })
+                    return
+                }
+                var dir = FileIO.standardPath("appData") + "/audio"
+                var dest = dir + "/aurora-" + Date.now() + ".wav"
+                var w = FileIO.writeBase64(dest, r.wavBase64)
+                if (!w.ok) {
+                    if (cb) cb({ "ok": false, "error": "Audio konnte nicht gespeichert werden" })
+                    return
+                }
+                if (routineScheduler._engine.conversationId === origin)
+                    routineScheduler._engine.appendGeneratedAudio(dest, req.prompt, true)
+                if (aplayRun.running) aplayRun.terminate()
+                aplayRun.start("aplay", ["-q", dest])
+                if (cb) cb({ "ok": true, "started": true, "path": dest })
+            })
+        }
     }
 
     // Async Video-Job: Status {jobId, prompt, origin, n}; Polling alle 5 s.
@@ -427,6 +530,11 @@ QtObject {
     function open() {
         var st = ConversationStore.open()
         if (!st.ok) console.warn("Aurora: Konversations-DB nicht verfügbar:", st.error)
+        // Routinen: Bestand laden und überfällige Läufe sofort anfordern —
+        // der Scheduler hängt am Widget-Root und arbeitet so im Hintergrund
+        // weiter; der erste 30-s-Takt soll nicht abgewartet werden müssen.
+        routineScheduler.refresh()
+        routineScheduler.poll()
     }
 
     function activate() {

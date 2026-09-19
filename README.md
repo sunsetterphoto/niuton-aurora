@@ -36,6 +36,11 @@ your own cloud storage rank equally; a third-party cloud is the deliberate excep
 - **Audio/music generation** via OpenRouter's free `lyria` models as an explicit chat tool — the
   finished WAV is played back locally (`aplay`) and shown in the chat.
 - **Voice**: speech-to-text via whisper.cpp and text-to-speech via [Piper](https://github.com/rhasspy/piper).
+- **Routines** (scheduled autonomous tasks): say *"check the Brent oil price every day at 12:00"*
+  and Aurora creates the routine itself (`manage_routines` tool) — or manage them in the sidebar
+  section above the chats (both sections collapsible). Due and overdue routines run on their own,
+  even while the panel widget sits in the background; each run lands in its own conversation.
+  Widget and app can run side by side without double execution (atomic claims in SQLite).
 - **Conversation history** in SQLite with **full-text search** (FTS5 over titles and
   message contents, with result snippets), plus a **knowledge base with RAG**: thumbs-up rated
   answers and manually curated entries (links / notes / facts) are embedded; on similar new
@@ -89,7 +94,8 @@ app (`aurora`). Models and voices are fetched separately via `./setup-assets.sh`
   friends.
 - **Models**: local model per power profile (auto mode) and the embedding model (default
   `nomic-embed-text`).
-- **Tools**: per-tool permission (auto / confirm) under Settings.
+- **Tools**: per-tool permission (auto / confirm) under Settings — including `manage_routines`
+  (default: auto; set it to *confirm* if routine creation should ask first, or *off* to disable).
 - **Data directory**: **Settings → Advanced → Datenordner** moves `aurora.db` anywhere you like —
   a synced folder of your own cloud, for instance. Empty means the default path. If you do use a
   sync folder: exclude `aurora.db-wal` and `aurora.db-shm` from syncing (SQLite runs in WAL mode)

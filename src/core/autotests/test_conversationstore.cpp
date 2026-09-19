@@ -21,6 +21,10 @@ public:
         dir = new QTemporaryDir;
         qputenv("AURORA_DB_PATH", (dir->path() + "/test.db").toUtf8());
         store = new ConversationStore;
+        QObject::connect(store, &ConversationStore::writeFailed,
+                         [](const QString &op, const QString &err) {
+            qWarning() << "WRITE FAILED:" << op << "->" << err;
+        });
     }
     ~StoreFixture()
     {
@@ -53,7 +57,7 @@ private Q_SLOTS:
             QSqlQuery q(db);
             QVERIFY(q.exec("PRAGMA user_version"));
             QVERIFY(q.next());
-            QCOMPARE(q.value(0).toInt(), 5);
+            QCOMPARE(q.value(0).toInt(), 6);
             QVERIFY(q.exec("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name"));
             QStringList tables;
             while (q.next()) tables << q.value(0).toString();
@@ -62,6 +66,7 @@ private Q_SLOTS:
             QVERIFY(tables.contains("tool_calls"));
             QVERIFY(tables.contains("knowledge"));
             QVERIFY(tables.contains("messages_fts"));   // Schema v5: Volltextindex
+            QVERIFY(tables.contains("routines"));       // Schema v6: geplante Selbstläufe
             db.close();
         }
         QSqlDatabase::removeDatabase("schemacheck");
@@ -956,6 +961,10 @@ private Q_SLOTS:
             QVERIFY(q.exec("DROP TRIGGER messages_fts_ad"));
             QVERIFY(q.exec("DROP TRIGGER messages_fts_au"));
             QVERIFY(q.exec("DROP TABLE messages_fts"));
+            // exakt eine v4-DB: die v6-Tabelle (frisch erzeugt, dann
+            // heruntergestuft) gehört da nicht hin — die v6-Migration legt
+            // sie streng (CREATE TABLE) wieder an.
+            QVERIFY(q.exec("DROP TABLE IF EXISTS routines"));
             QVERIFY(q.exec("PRAGMA user_version = 4"));
             db.close();
         }
@@ -1034,6 +1043,144 @@ private Q_SLOTS:
             QVERIFY(store.dbPath().endsWith(QStringLiteral("/aurora/aurora.db")));
         }
         qunsetenv("AURORA_CONFIG_PATH");
+    }
+
+    // ------------------------------------------------------------------ routines
+
+    // CRUD-Runde: add -> list (camelCase-Felder) -> update (Whitelist) -> delete.
+    void routines_crud_undFeldbehandlung()
+    {
+        StoreFixture f;
+        QVERIFY(f.store->open().value("ok").toBool());
+        QSignalSpy done(f.store, &ConversationStore::writeCompleted);
+
+        const QString id = f.store->newUuid();
+        f.store->addRoutine({{"id", id}, {"title", "Brent-Preis"}, {"prompt", "Prüfe den Preis"},
+                             {"kind", "daily"}, {"timeOfDay", "12:00"},
+                             {"nextRun", qlonglong(2000000000000)}, {"enabled", true}});
+        QTRY_COMPARE(done.count(), 1);
+
+        QVariantList rows = f.store->routines();
+        QCOMPARE(rows.size(), 1);
+        QVariantMap r = rows.first().toMap();
+        QCOMPARE(r.value("id").toString(), id);
+        QCOMPARE(r.value("title").toString(), QString("Brent-Preis"));
+        QCOMPARE(r.value("prompt").toString(), QString("Prüfe den Preis"));
+        QCOMPARE(r.value("kind").toString(), QString("daily"));
+        QCOMPARE(r.value("timeOfDay").toString(), QString("12:00"));
+        QCOMPARE(r.value("weekday").toInt(), 0);
+        QCOMPARE(r.value("intervalMinutes").toInt(), 60);
+        QCOMPARE(r.value("enabled").toBool(), true);
+        QCOMPARE(r.value("nextRun").toLongLong(), qlonglong(2000000000000));
+        QCOMPARE(r.value("lastRun").toLongLong(), qlonglong(0));
+        QCOMPARE(r.value("lastStatus").toString(), QString(""));
+
+        // Update: Teil-Felder; nextRun=0 -> NULL (ungeplant), lastStatus gesetzt
+        f.store->updateRoutine(id, {{"lastStatus", "ok"}, {"lastRun", qlonglong(2000000000001)},
+                                    {"nextRun", qlonglong(2000003600000)},
+                                    {"lastConversation", "c1"}});
+        QTRY_COMPARE(done.count(), 2);
+        rows = f.store->routines();
+        r = rows.first().toMap();
+        QCOMPARE(r.value("lastStatus").toString(), QString("ok"));
+        QCOMPARE(r.value("lastRun").toLongLong(), qlonglong(2000000000001));
+        QCOMPARE(r.value("nextRun").toLongLong(), qlonglong(2000003600000));
+        QCOMPARE(r.value("lastConversation").toString(), QString("c1"));
+
+        // Unbekannte id -> writeFailed (execIdOp-Pfad)
+        QSignalSpy fail(f.store, &ConversationStore::writeFailed);
+        f.store->updateRoutine(f.store->newUuid(), {{"title", "x"}});
+        QTRY_COMPARE(fail.count(), 1);
+
+        f.store->deleteRoutine(id);
+        QTRY_COMPARE(done.count(), 3);
+        QCOMPARE(f.store->routines().size(), 0);
+    }
+
+    // claimRoutines: fordert nur enabled + fällige; setzt 'running' + Token;
+    // ein zweiter Claim bekommt dieselben Zeilen NICHT erneut; die Spur wird
+    // über updateRoutine(claimToken="") freigegeben.
+    void claimRoutines_nurFaellige_atomar_undFreigabe()
+    {
+        StoreFixture f;
+        QVERIFY(f.store->open().value("ok").toBool());
+
+        const qlonglong now = 2000000000000;
+        const QString faellig = f.store->newUuid();
+        const QString zukunft = f.store->newUuid();
+        const QString pausiert = f.store->newUuid();
+        const QString ungeplant = f.store->newUuid();
+        f.store->addRoutine({{"id", faellig}, {"title", "fällig"}, {"prompt", "A"},
+                             {"kind", "daily"}, {"timeOfDay", "12:00"},
+                             {"nextRun", qlonglong(now - 1)}, {"enabled", true}});
+        f.store->addRoutine({{"id", zukunft}, {"title", "zukunft"}, {"prompt", "B"},
+                             {"kind", "daily"}, {"timeOfDay", "12:00"},
+                             {"nextRun", qlonglong(now + 3600000)}, {"enabled", true}});
+        f.store->addRoutine({{"id", pausiert}, {"title", "pausiert"}, {"prompt", "C"},
+                             {"kind", "daily"}, {"timeOfDay", "12:00"},
+                             {"nextRun", qlonglong(now - 1)}, {"enabled", false}});
+        f.store->addRoutine({{"id", ungeplant}, {"title", "ungeplant"}, {"prompt", "D"},
+                             {"kind", "daily"}, {"timeOfDay", "12:00"},
+                             {"nextRun", qlonglong(0)}, {"enabled", true}});
+        QSignalSpy done(f.store, &ConversationStore::writeCompleted);
+        QTRY_COMPARE(done.count(), 4);
+
+        QSignalSpy claimed(f.store, &ConversationStore::routinesClaimed);
+        f.store->claimRoutines(now);
+        QTRY_COMPARE(claimed.count(), 1);
+        QTRY_COMPARE(done.count(), 5);   // claimRoutines meldet sich auch als writeCompleted
+        QVariantList rows = claimed.first().at(0).toList();
+        QCOMPARE(rows.size(), 1);
+        QCOMPARE(rows.first().toMap().value("id").toString(), faellig);
+        QCOMPARE(rows.first().toMap().value("prompt").toString(), QString("A"));
+
+        // Zeile ist 'running' mit Token -> zweiter Claim in derselben "Sitzung"
+        // bekommt sie nicht erneut (Atomarität des Forderns).
+        f.store->claimRoutines(now + 1);
+        QTRY_COMPARE(claimed.count(), 2);
+        QCOMPARE(claimed.last().at(0).toList().size(), 0);
+
+        // Nach der Ausführung gibt der Scheduler den Claim frei
+        f.store->updateRoutine(faellig, {{"claimToken", QString()},
+                                         {"lastStatus", "ok"},
+                                         {"nextRun", qlonglong(now + 86400000)}});
+        QTRY_COMPARE(done.count(), 6);
+        // 30 min später: fällig erst wieder morgen, zukunft erst in 1 h,
+        // pausiert disabled, ungeplant NULL -> nichts zu holen
+        f.store->claimRoutines(now + 1800000);
+        QTRY_COMPARE(claimed.count(), 3);
+        QCOMPARE(claimed.last().at(0).toList().size(), 0);
+    }
+
+    // Abgestürzte Instanz: 'running'/Claim-Reste werden beim open() freigegeben
+    // (sweepOnOpen) — next_run in der Vergangenheit wird danach sofort wieder
+    // gefordert (genau eine Nachhol-Ausführung).
+    void sweepOnOpen_gibtHaengendeLaufFrei()
+    {
+        QTemporaryDir dir;
+        qputenv("AURORA_DB_PATH", (dir.path() + "/test.db").toUtf8());
+        QString id;
+        {
+            ConversationStore store;
+            QVERIFY(store.open().value("ok").toBool());
+            id = store.newUuid();
+            QSignalSpy done(&store, &ConversationStore::writeCompleted);
+            store.addRoutine({{"id", id}, {"title", "t"}, {"prompt", "p"},
+                              {"kind", "daily"}, {"timeOfDay", "12:00"},
+                              {"nextRun", qlonglong(1000000000000)}, {"enabled", true}});
+            QTRY_COMPARE(done.count(), 1);
+            // Crash-Simulation: Zeile direkt auf 'running' + Claim setzen
+            store.updateRoutine(id, {{"lastStatus", "running"}, {"claimToken", QString("c1")}});
+            QTRY_COMPARE(done.count(), 2);
+        }
+
+        {
+            ConversationStore store;
+            QVERIFY(store.open().value("ok").toBool());
+            const QVariantMap r = store.routines().first().toMap();
+            QCOMPARE(r.value("lastStatus").toString(), QString("idle"));
+        }
+        qunsetenv("AURORA_DB_PATH");
     }
 };
 

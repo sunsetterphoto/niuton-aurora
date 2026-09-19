@@ -46,6 +46,7 @@ QtObject {
     property string toolWebFetch: ConfigStore.value("toolWebFetch")
     property string toolWriteFile: ConfigStore.value("toolWriteFile")
     property string toolRunCommand: ConfigStore.value("toolRunCommand")
+    property string toolManageRoutines: ConfigStore.value("toolManageRoutines")
     property int toolMaxRounds: ConfigStore.value("toolMaxRounds")
     property bool twoPhaseToolCalls: ConfigStore.value("twoPhaseToolCalls")
 
@@ -136,6 +137,7 @@ QtObject {
         toolWebFetch = ConfigStore.value("toolWebFetch")
         toolWriteFile = ConfigStore.value("toolWriteFile")
         toolRunCommand = ConfigStore.value("toolRunCommand")
+        toolManageRoutines = ConfigStore.value("toolManageRoutines")
         toolMaxRounds = ConfigStore.value("toolMaxRounds")
         twoPhaseToolCalls = ConfigStore.value("twoPhaseToolCalls")
         comfyEndpoint = ConfigStore.value("comfyEndpoint")

@@ -49,6 +49,14 @@ KCM.SimpleKCM {
             onActivated: ConfigStore.setValue("toolWebFetch", root.permOptions[currentIndex])
         }
 
+        QQC2.ComboBox {
+            id: manageRoutinesCombo
+            Kirigami.FormData.label: "Routinen verwalten:"
+            model: root.permLabels
+            Component.onCompleted: currentIndex = root.permOptions.indexOf(ConfigStore.value("toolManageRoutines"))
+            onActivated: ConfigStore.setValue("toolManageRoutines", root.permOptions[currentIndex])
+        }
+
         Kirigami.Separator {
             Kirigami.FormData.isSection: true
             Kirigami.FormData.label: "Schreibende Tools (Systemänderungen)"

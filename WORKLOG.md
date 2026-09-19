@@ -118,3 +118,93 @@ Aufgaben grob:
   mit `QT_QPA_PLATFORM=offscreen`, cwd = build/src/engine. (Funktionsfilter-PosArg scheint ignoriert;
   läuft dann alle.)
 - qDebug im Release stumm; für Diagnose Zusatz-compare/QCOMPARE in Tests einbauen und wieder rausnehmen.
+
+---
+
+## Stolpersteine dieser Session (2026-09-03, Merkliste)
+
+1. **Config-Datei durch externes Tool zerlegt**: `~/.config/net.niuton.aurora.rc` war mit
+   lowercase-Keys (`remoteendpoint`) + doppelten Einträgen + `openrouterFavorites=[...]` OHNE
+   Quotes geschrieben → QSettings parst `[...]` als Sektionskopf, ConfigStore (CamelCase) fand
+   nichts mehr. Fix: Datei sauber neu (CamelCase + Favoriten **gequotet**, QSettings liefert den
+   Wert inkl. Quotes = exakt das JSON, das `_parseFavorites` erwartet). Backup erstellen.
+
+2. **Plasmashell "Neustart" greift nicht bei manuell gestartetem Prozess**: `install.sh` restartet
+   nur die systemd-Unit/transiente; wenn plasmashell manuell läuft (nohup), bleibt die alte PID.
+   Dann: `pkill -x plasmashell` + selbst neu starten (`nohup plasmashell & disown`) — er kommt
+   NICHT automatisch zurück. PID danach verifizieren.
+
+3. **`readonly`-Property über Funktionsaufruf auf internem Zustand wertet nie neu aus**:
+   `readonly property var effortChoices: modelManager ? modelManager.activeEfforts() : []` —
+   readonly bindet nur an `modelManager` (statisch), nicht an activeModel/Models → Dropdown blieb
+   unsichtbar. Fix: mutable Property + `_refreshEffortChoices()` bei `onSelectedModelChanged`/
+   `onActiveModelChanged`/`Component.onCompleted`.
+
+4. **`QQC2.ComboBox` verwaltet `visible` intern**: deklarative `visible:`-Bindung schlägt nicht
+   zuverlässig durch (in Tests blieb false). Lösung: Item-Container mit `visible`+`enabled`.
+
+5. **QML-Test `when: windowShown` nötig** für sichtbarkeits-/klick-abhängige Tests; programmatisches
+   `checked=`/`toggle()` feuert KEIN `toggled/clicked` (Mausklick im offscreen fragil) → Tests
+   lieber auf deterministische Properties/Funktionen setzen. `QTRY_VERIFY` existiert in QML NICHT
+   (nur `wait` + erneutes Lesen).
+
+6. **llama.cpp Router-Modus**:
+   - `/v1/models` kann beim ERSTEN Aufruf `[]` liefern (load-on-startup noch nicht fertig) —
+     Race beim Start; Aurora muss das beim Polling verkraften (neu proben).
+   - `/models/unload` → 200 `{"success":true}`, aber Status erst nach `stop-timeout` (10s)
+     `unloaded` — NICHT sofort.
+   - Autoload: neuer Chat nach Unload lädt das Modell automatisch wieder (verifiziert).
+   - Preset-Pfade: `%h` wird in llama.cpp-Presets **nicht** expandiert → Beispiel mit
+     `<HOME>`-Platzhalter + `install.sh` sed; echte absolute Pfade NIE ins öffentliche Repo
+     (Preset als `.example` ausliefern).
+
+7. **Edit-Fallen am Edit-Tool**: mehrfach durch zu kleine `oldString`-Blöcke versehentlich
+   Funktionsköpfe/Zeilen zerstört (`function test_generateImage...()` Kopf, `if (busy) return`,
+   `chatFn`-Zeile, `ToolTipAvoid: {}`-Fremdkörper). Lektion: bei größeren Umbauten die betroffene
+   Region NACH dem Edit lesen; nicht mit einzelnem `}`-Matching arbeiten (Kollisionsgefahr).
+
+8. **`usage.completion_tokens_details.reasoning_tokens`** = empirischer Reasoning-Nachweis
+   (DeepSeek/OpenRouter live verifiziert); 0/fehlend = kein Badge (kein Fake).
+
+9. **DeepSeek V4 Flash**: Modell-ID `~deepseek/deepseek-v4-flash-latest` (Tilde-Präfix ist gültig);
+   `supported_efforts: ["max","high","low"]`, default "high", NOT mandatory → effort-Filter im UI
+   nötig; `reasoning_effort` + `reasoning:{enabled}` sind pro Request erlaubt (llama-server
+   akzeptiert `reasoning_effort` ebenfalls pro Request laut Doku).
+
+10. **`git push`-Reihenfolge**: erst feature pushen, dann merge nach main (FF) + push main —
+    danach `git ls-remote` zur Verifikation. main und feature zeigen sonst unterschiedlich.
+---
+
+## 19.09.2026 — Phase 6: Routinen (geplante Selbstläufe)
+
+Auftrag: Aurora soll fällige/überfällige Routinen selbstständig ausführen (auch als
+Hintergrund-Widget), sich Routineeinträge per Chat selbst anlegen („Prüfe den Brent-Preis jeden
+Tag um 12 Uhr"), und die Einträge in der Seitenleiste OBERHALB der Chats zeigen — beide Sektionen
+einklappbar, Routinen einsehbar/bearbeitbar/anlegbar.
+
+Umsetzung (54/54 Tests grün):
+- **Schema v6**: Tabelle `routines` (kind/time_of_day/weekday/interval_minutes/enabled/
+  next_run/last_run als ms-Epoch/last_status/last_conversation/claim_token), Migration additiv,
+  sweepOnOpen gibt hängende Läufe frei. `routines()`-Read + `addRoutine/updateRoutine/
+  deleteRoutine/claimRoutines`-Writes; `claimRoutines` atomar (UPDATE + SELECT in einer
+  BEGIN-IMMEDIATE-Transaktion, RETURNING-artig über claim_token) → Widget+App doppeln nicht.
+  **Falle**: `next_run <= :now` mit isoNow-String als `:now` trifft JEDE Zeile (SQLite-
+  Typenordnung INTEGER < TEXT) — nowMs als Zahl binden.
+- **RoutineScheduler.qml**: 30-s-Takt, läuft am Widget-Root (unabhängig von `active`), eigene
+  AuroraEngine-Instanz (kein Konflikt mit dem UI-Chat), je Lauf eine eigene Konversation
+  (Titel `⟳ …`, Touch NACH send() enqueued — sonst Überschreiber _maybeSetTitle).
+  computeNextRun in Lokalzeit (daily/weekly/interval/once); once deaktiviert sich; überfällige
+  Läufe genau einmal nachholen. **Falle (Re-Entrancy)**: onBusyChanged feuert mitten in der
+  `state="idle"`-Zuweisung von _finalizeAssistant — direkter Finish überschreibt den
+  nachfolgenden Lauf → `Qt.callLater`.
+- **RoutineTool (manage_routines)**: create/list/update/delete/run_now; ctx.routines über
+  ChatController._buildCtx + AuroraEngine durchgereicht (beide Engines teilen den Scheduler).
+  Permission `toolManageRoutines`, Default auto (KCM ConfigTools ergänzt).
+- **UI**: Sidebar mit Routinen-Sektion (Zeilen: Titel, Zeitplan · nächster Lauf, ⚠-Badge bei
+  Fehler, „läuft …" während aktiven Laufs; Play/Edit/Delete-Zwei-Klick) + Chats-Sektionsheader;
+  RoutineDialog als Overlay (KEIN fensterbasiertes QQC2.Dialog — Widget-Popup!). Toggles
+  persistiert (routinesOpen/chatsOpen im ConfigStore).
+- **Tests**: test_conversationstore (Schema/CRUD/Claim/Sweep), tst_routinescheduler (15),
+  tst_sidebar (10), tst_routinedialog (11). **QML-Test-Fallen**: qmltestrunner hält die
+  Testwurzel unsichtbar → `.visible` immer false → `visible = true` in init(); Änderungen an
+  QML-Modulquellen brauchen `cmake --build` (qmlcache), sonst läuft beim Test der alte Stand.

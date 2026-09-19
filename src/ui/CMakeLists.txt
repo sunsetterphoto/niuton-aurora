@@ -23,6 +23,7 @@ ecm_target_qml_sources(auroraui SOURCES
     qml/ModelTuner.qml
     qml/MainView.qml
     qml/KnowledgeView.qml
+    qml/RoutineDialog.qml
 )
 
 # Icon-Assets fuers Thinking-Toggle (Header.qml): diese ECM-Version kennt bei
@@ -65,6 +66,8 @@ if(BUILD_TESTING)
     aurora_ui_qmltest(tst_modeltuner)
     aurora_ui_qmltest(tst_messagebubble)
     aurora_ui_qmltest(tst_knowledgeview)
+    aurora_ui_qmltest(tst_sidebar)
+    aurora_ui_qmltest(tst_routinedialog)
     # package/-KCM-Seiten lesen ConfigStore — AURORA_CONFIG_PATH gegen die echte rc abschotten
     aurora_ui_qmltest(tst_packageconfig
         "AURORA_CONFIG_PATH=${CMAKE_BINARY_DIR}/tst_packageconfig.rc")

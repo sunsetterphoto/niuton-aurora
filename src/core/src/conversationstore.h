@@ -55,6 +55,12 @@ public:
     // snippet, titleMatch} — snippet leer bei Titel-Treffern, sonst Textauszug.
     Q_INVOKABLE QVariantList searchConversations(const QString &text, int limit = 50) const;
 
+    // Routinen (Schema v6). Reads synchron; next_run/last_run als ms-Epoch
+    // (0 = ungeplant). Einträge: {id, title, prompt, kind, timeOfDay, weekday,
+    // intervalMinutes, enabled, nextRun, lastRun, lastStatus, lastConversation,
+    // createdAt, updatedAt}.
+    Q_INVOKABLE QVariantList routines() const;
+
     // Writes (asynchron)
     Q_INVOKABLE void createConversation(const QString &id, const QString &title);
     Q_INVOKABLE void appendMessage(const QVariantMap &msg);
@@ -71,6 +77,14 @@ public:
     Q_INVOKABLE void appendToolCall(const QVariantMap &toolCall);
     Q_INVOKABLE void updateToolCall(const QString &id, const QVariantMap &fields);
     Q_INVOKABLE void sweepNonFinal();
+    Q_INVOKABLE void addRoutine(const QVariantMap &fields);
+    Q_INVOKABLE void updateRoutine(const QString &id, const QVariantMap &fields);
+    Q_INVOKABLE void deleteRoutine(const QString &id);
+    // Fordert ALLE fälligen Routinen atomar an (UPDATE setzt claim_token +
+    // last_status 'running' in derselben Transaktion, in der gelesen wird).
+    // Treffer kommen über das routinesClaimed-Signal; nichts fällig = leere
+    // Liste (kein Fehler).
+    Q_INVOKABLE void claimRoutines(qlonglong nowMs);
 
 Q_SIGNALS:
     void readyChanged();
@@ -80,6 +94,8 @@ Q_SIGNALS:
     // Verdrahtung obliegt dem Aufrufer; Rückgabewerte bleiben im Fehlerfall leer.
     void readFailed(const QString &op, const QString &error);
     void writeCompleted(const QString &op);
+    // claimRoutines: die in diesem Takt geforderten Routinen (camelize Felder).
+    void routinesClaimed(const QVariantList &rows);
     // intern: Auftrag an den Worker (queued über die Thread-Grenze)
     void opRequested(const QString &op, const QVariantMap &args);
 

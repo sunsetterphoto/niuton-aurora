@@ -19,6 +19,9 @@ QtObject {
     property var http: (typeof Http !== "undefined") ? Http : null
     property var chatFn: null                 // function(request) -> ChatJob
     property var embedFn: null                // function(input, cb) -> cb({vec, model} | null)
+    // Routinen-Scheduler (geteilt mit allen Engines): ctx.routines für das
+    // manage_routines-Tool. Nur im Kontext, wenn injiziert — schlanke Test-
+    // Mocks bleiben ohne.
     // Explizite Cloud-Bildgenerierung (OpenRouter-Bildmodell). Funktion
     // (request, cb) mit request.prompt; cb({ok, images:[dataUrl], error}).
     // Nur gesetzt, wenn ein Bildmodell aktiv ist — die Cloud ist nie automatisch.
@@ -33,6 +36,8 @@ QtObject {
     // error}). Streaming-Job: Tool bestätigt sofort, fertige WAV spielt der
     // Controller ab (pointer).
     property var audioGenFn: null
+    // Geteilter RoutineScheduler: über ctx an manage_routines durchgereicht.
+    property var routines: null
 
     // --- Kontext (Betrieb: an ModelManager gebunden; Test: gesetzt) ---
     property string activeModel: ""
@@ -92,7 +97,10 @@ QtObject {
             "thinking": f.thinking || "", "streaming": f.streaming === true,
             "ts": f.ts || "", "mediaPath": f.mediaPath || "", "mediaType": f.mediaType || "",
             "status": f.status || "", "toolActivity": f.toolActivity || "[]",
-            "rating": f.rating || 0, "ragSources": f.ragSources || "[]"
+            "rating": f.rating || 0, "ragSources": f.ragSources || "[]",
+            // Reasoning-Nachweis (P-Nachweis): nur wenn die Antwort wirklich
+            // Reasoning-Tokens hatte; leer sonst (kein Fake-Badge).
+            "usageText": f.usageText || "", "effortUsed": f.effortUsed || ""
         })
         messageAppended()
     }
@@ -164,6 +172,9 @@ QtObject {
             // Explizite Audioausgabe (generate_audio-Tool): nur im Kontext,
             // wenn der Controller die Cloud-Funktion hat.
             "audioGenFn": ctl.audioGenFn,
+            // Routinen-Verwaltung (manage_routines-Tool): der geteilte
+            // Scheduler — nur im Kontext, wenn injiziert.
+            "routines": ctl.routines,
             // Ursprungs-Konversation für Tools, die eine spätere Zuordnung brauchen
             // (generate_image reicht sie als originConvId an ComfyClient weiter, damit
             // der onFinished-Guard tool-Bilder ebenfalls der richtigen Konversation
@@ -842,11 +853,24 @@ QtObject {
             msg.extra = costExtra
         }
         var aid = _persist(msg)
+        // Reasoning-Nachweis: nur anzeigen, wenn die Antwort wirklich
+        // Reasoning-Tokens hatte (usage.completion_tokens_details.reasoning_tokens).
+        // Ohne Feld/0 = kein Badge — Effort nur als Zusatzinfo, wenn belegt.
+        var usageText = ""
+        var effortUsed = ""
+        if (ctl._lastUsage && ctl._lastUsage.completion_tokens_details
+                && ctl._lastUsage.completion_tokens_details.reasoning_tokens > 0) {
+            usageText = "Reasoning: " + ctl._lastUsage.completion_tokens_details.reasoning_tokens + " Tokens"
+            effortUsed = ctl.reasoningEffort   // globaler/Override-Default des Requests
+            if (effortUsed === "") effortUsed = "Modell-Standard"
+        }
         if (_streamIndex >= 0 && _streamIndex < chatModel.count) {
             chatModel.setProperty(_streamIndex, "streaming", false)
             chatModel.setProperty(_streamIndex, "text", _content)
             chatModel.setProperty(_streamIndex, "thinking", _thinking)
             chatModel.setProperty(_streamIndex, "status", status)
+            chatModel.setProperty(_streamIndex, "usageText", usageText)
+            chatModel.setProperty(_streamIndex, "effortUsed", effortUsed)
             chatModel.setProperty(_streamIndex, "msgId", aid)   // regenerate braucht die msgId
             if (ragSlim.length > 0) {
                 _ragByMsgId[aid] = ragSlim

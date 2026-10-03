@@ -26,6 +26,12 @@ const QVariantMap &ConfigStore::defaults()
         { QStringLiteral("toolWebFetch"),           QStringLiteral("auto") },
         { QStringLiteral("toolWriteFile"),          QStringLiteral("confirm") },
         { QStringLiteral("toolRunCommand"),         QStringLiteral("confirm") },
+        // Routinen anlegen/ändern: autonom, aber sichtbar (Sidebar) und jederzeit
+        // löschbar; wer die Bestätigung will, stellt hier "confirm" ein.
+        { QStringLiteral("toolManageRoutines"),     QStringLiteral("auto") },
+        // Sidebar-Sektionen ein-/ausgeklappt (Routinen über den Chats)
+        { QStringLiteral("routinesOpen"),           true },
+        { QStringLiteral("chatsOpen"),              true },
         { QStringLiteral("toolMaxRounds"),          5 },
         { QStringLiteral("comfyEnabled"),           true },
         { QStringLiteral("comfyEndpoint"),          QString() },

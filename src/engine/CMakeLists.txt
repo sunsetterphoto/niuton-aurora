@@ -22,6 +22,7 @@ ecm_target_qml_sources(auroraengine SOURCES
     qml/ServiceManager.qml
     qml/SpeachesClient.qml
     qml/ChatController.qml
+    qml/RoutineScheduler.qml
     qml/Tool.qml
     qml/ToolRegistry.qml
     qml/PermissionResolver.qml
@@ -33,6 +34,7 @@ ecm_target_qml_sources(auroraengine SOURCES
     qml/tools/WebSearchTool.qml
     qml/tools/WebFetchTool.qml
     qml/tools/RunCommandTool.qml
+    qml/tools/RoutineTool.qml
     qml/tools/GenerateImageTool.qml
     qml/tools/GenerateVideoTool.qml
     qml/tools/GenerateAudioTool.qml
@@ -101,6 +103,7 @@ if(BUILD_TESTING)
     aurora_engine_qmltest(tst_chatcontroller_rag)
     aurora_engine_qmltest(tst_contextcompactor)
     aurora_engine_qmltest(tst_chatcontroller_compaction)
+    aurora_engine_qmltest(tst_routinescheduler)
     aurora_engine_qmltest(tst_auroraengine)
     aurora_engine_qmltest(tst_auroraengine_knowledge)
     aurora_engine_qmltest(tst_auroracontroller

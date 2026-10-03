@@ -216,3 +216,46 @@ Sackgassen, nicht erneut prüfen:
 - **Test-Isolation**: Fake-Zähler in `init()` zurücksetzen; im QML erst Zustand resetten, DANN
   Signal-Spys leeren (sonst zählt der Reset-Bump mit). QML-IDs außerhalb des Objekts nicht
   auflösbar — Test-Hooks als Properties (Muster `tst_header.qml`).
+
+---
+
+## 8. Routinen (geplante Selbstläufe) — Stand 19.09.2026
+
+Aurora führt Aufgaben selbstständig aus, wenn sie fällig sind — auch während das Panel-Widget im
+Hintergrund läuft. Anlegen per Chat („Prüfe den Brent-Preis jeden Tag um 12 Uhr") über das
+`manage_routines`-Tool, oder manuell im Dialog der Seitenleiste.
+
+**Architektur (drei Ebenen):**
+
+- **Store (Schema v6)**: Tabelle `routines` — `kind` (daily/weekly/interval/once), `time_of_day`
+  („HH:MM", Lokalzeit), `weekday` (0=Mo), `interval_minutes`, `enabled`, `next_run`/`last_run`
+  (ms-Epoch, 0 = ungeplant), `last_status`, `last_conversation`, `claim_token`. Migration 5→6 ist
+  rein additiv; `open()` gibt hängengebliebene Läufe (`running`/fremder Claim) frei (sweepOnOpen).
+- **`RoutineScheduler.qml` (Engine)**: 30-s-Takt, fordert Fällige **atomar** über
+  `store.claimRoutines()` (UPDATE setzt `claim_token` + `last_status='running'` in derselben
+  Transaktion — Widget und App können parallel laufen, ohne denselben Lauf doppelt zu starten).
+  Jeder Lauf läuft in einer **eigenen AuroraEngine-Instanz** (nutzer-Chat blockiert keinen Lauf),
+  in einer **eigenen Konversation pro Lauf** (frischer Kontext, kein Zuwachsen); die Konversation
+  heißt `⟳ <Titel>` und erscheint wie ein normaler Chat in der Sidebar. Überfällige Läufe werden
+  beim Start genau EINMAL nachgeholt (kein Catch-up-Rückstand); `once` deaktiviert sich selbst.
+- **UI**: Sidebar-Sektion „Routinen" **oberhalb** der Chats, beide Sektionen einklappbar
+  (`routinesOpen`/`chatsOpen` im ConfigStore). Klick auf eine Routine öffnet
+  `RoutineDialog.qml` (Overlay, kein fensterbasiertes Dialog — im Widget-Popup könnte ein
+  eigenes Fenster hinter dem Popup landen); Play führt außer der Reihe aus, Delete mit
+  Zwei-Klick-Bestätigung.
+
+**Wichtige Details:**
+
+- `ChatController._buildCtx()` reicht `ctx.routines` (den geteilten Scheduler) an
+  `manage_routines` durch — der kontrolliert CRUD über `createRoutine/updateRoutine/
+  deleteRoutine/runNow` (normalisiert Felder, rechnet `next_run` neu bei Zeitplan-Änderungen).
+- Permission `toolManageRoutines` (Default **auto**, konfigurierbar in Einstellungen → Tools).
+  Ein Lauf darf wiederum Routinen verwalten (gleicher Scheduler); wer das nicht will, stellt
+  „confirm" ein.
+- Cloud-Video (`videoGenFn`) ist am Routine-Engine bewusst NICHT injiziert — der asynchrone
+  Polling-Pfad hängt am UI-Controller; das Tool blendet sich im Routine-Kontext aus.
+- **Re-Entrancy-Falle**: `ChatController` setzt `state="idle"` mitten in `_finalizeAssistant`;
+  der `onBusyChanged`-Handler des Schedulers darf deshalb NICHT synchron den nächsten Lauf
+  starten (die restlichen Zuweisungen überschreiben den neuen Zustand) — `Qt.callLater`.
+- Tests: `test_conversationstore.cpp` (Schema/CRUD/Claim/Sweep), `tst_routinescheduler.qml`
+  (Zeitplan-Mathe, Claim→Lauf→Buchhaltung, Queues), `tst_sidebar.qml`, `tst_routinedialog.qml`.

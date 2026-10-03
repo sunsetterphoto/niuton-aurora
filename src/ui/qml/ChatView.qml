@@ -93,6 +93,8 @@ Item {
                 showThinking: chatViewRoot.showThinking
                 isLast: index === listView.count - 1 && !chatViewRoot.busy
                 canSpeak: chatViewRoot.ttsAvailable
+                usageText: (model.usageText !== undefined) ? model.usageText : ""
+                effortUsed: (model.effortUsed !== undefined) ? model.effortUsed : ""
                 onRegenerateRequested: chatViewRoot.regenerateRequested()
                 onSpeakRequested: function(text) { chatViewRoot.speakRequested(text) }
                 onRateRequested: function(msgId, rating) { chatViewRoot.rateRequested(msgId, rating) }

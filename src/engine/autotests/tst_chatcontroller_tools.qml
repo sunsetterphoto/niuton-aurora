@@ -162,6 +162,33 @@ Item {
             compare(noticeCount, 1)
         }
 
+        // done mit usage: Reasoning-Nachweis landen als usageText/effortUsed in der
+        // Chat-Zeile (nur wenn completion_tokens_details.reasoning_tokens > 0).
+        function test_doneSetztReasoningNachweis() {
+            ctl.reasoningEffort = "high"
+            ctl.activeCaps = ["tools", "thinking"]
+            ctl.thinkingEnabled = true
+            ctl.send("Hi", null)
+            lastJob.done({ content: "A", thinking: "Überlegung", toolCalls: [],
+                           usage: { "completion_tokens_details": { "reasoning_tokens": 42 } } })
+            var row = ctl.chatModel.get(1)
+            compare(row.usageText, "Reasoning: 42 Tokens")
+            compare(row.effortUsed, "high")
+            ctl.reasoningEffort = ""
+            ctl.thinkingEnabled = false
+            ctl.activeCaps = ["tools"]
+        }
+
+        // Ohne Reasoning-Tokens -> kein Badge (kein Fake-Badge).
+        function test_doneOhneReasoningTokensKeinBadge() {
+            ctl.send("Hi", null)
+            lastJob.done({ content: "B", thinking: "", toolCalls: [],
+                           usage: { "completion_tokens_details": { "reasoning_tokens": 0 } } })
+            var row = ctl.chatModel.get(1)
+            compare(row.usageText, "")
+            compare(row.effortUsed, "")
+        }
+
         function test_turnIdPersistedPerTurn() {
             ctl.send("Erster Zug", null)
             lastJob.done({ content: "Antwort 1", thinking: "", toolCalls: [] })

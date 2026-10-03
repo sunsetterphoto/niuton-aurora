@@ -21,6 +21,10 @@ Item {
     required property string msgId
     required property int rating
     required property string ragSources
+    // Reasoning-Nachweis (P-Nachweis): Anzeigetext + Effort, nur wenn die
+    // Antwort wirklich Reasoning-Tokens hatte.
+    required property string usageText
+    required property string effortUsed
 
     // Bound explicitly from parent
     property bool showThinking: false
@@ -42,6 +46,10 @@ Item {
     // Zeigt die Bubble einen Body (Haupt-Bubble)? Wenn nicht (leere Assistant-Nachricht),
     // darf die Aktionszeile keine Höhe reservieren -> sonst Ghost-Bubble mit Leerabstand.
     readonly property bool _hasBody: bubble.text !== "" || bubble.isUser || bubble.streaming || bubble.mediaPath !== ""
+
+    // Reasoning-Nachweis: Badge sichtbar/Text (Test-Hooks; id reasoningBadge unten)
+    readonly property bool _reasoningBadgeShown: reasoningBadge.visible
+    readonly property string _badgeText: reasoningBadge.text
 
     readonly property var _activity: {
         if (isUser || !toolActivity) return []
@@ -219,6 +227,19 @@ Item {
                     elide: Text.ElideRight
                 }
             }
+        }
+
+        // ---------- Reasoning-Nachweis (nur wenn wirklich gerechnet wurde) ----------
+        QQC2.Label {
+            id: reasoningBadge
+            visible: !bubble.isUser && bubble.usageText !== ""
+            text: "⚙ " + bubble.usageText
+                  + (bubble.effortUsed !== "" ? " · " + bubble.effortUsed : "")
+            font.pointSize: Kirigami.Theme.smallFont.pointSize
+            opacity: 0.55
+            elide: Text.ElideRight
+            wrapMode: Text.NoWrap
+            width: parent.width
         }
 
         // ---------- Haupt-Bubble ----------

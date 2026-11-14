@@ -7,7 +7,23 @@ wo das Projekt steht, was unmittelbar zu tun ist und welche Konventionen gelten.
 
 ---
 
-## 1. Sofortlage
+## 0. Aktueller Stand (03.10.2026) — ersetzt §1/§3.2
+
+- Aktive Entwicklung **hier** (Public-Repo). Das alte Dev-Repo `~/Schreibtisch/Aurora-KDE-Widget` steht seit Juli still.
+- `main` = a569581. `feature/openai-backend` liegt 3 Commits voraus (Reasoning-Anzeige, Effort-Fix, Routinen)
+  → **PR #1** offen: https://github.com/sunsetterphoto/niuton-aurora/pull/1
+- **Nachtrag 14.11.2026:** `feature/openai-backend` lokal in `main` gemergt und nach git.snieds.com
+  gepusht (54/54 grün). Haupt-Repo ist git.snieds.com, GitHub nur Spiegel — PR #1 dort nicht mergen.
+- **54/54 Tests grün**. Der Build ist nach `~/.local` installiert. Das Widget zeigt ihn erst nach
+  `systemctl --user restart plasma-plasmashell.service`.
+- `backup/vor-ip-bereinigung` gelöscht (der Unterschied waren nur echte IPs in zwei Tests).
+- Erledigt seit §3.3: P1 Video, P2 Audio-Erzeugung, P3 Audio-Anhänge, llama-server-Router,
+  Reasoning-/Sampling-Steuerung, Routinen (§8). Offen: P4 Video-Analyse, P5 lokal, P6 PDF, Stufe 2f
+  (Handover-Knopf + DB-Mehrprozess), Datum/Selbstwissen im Systemprompt, ~16 defensive Audit-Punkte.
+- **Neues Feature in Planung:** Entscheidungsmodell (OpenJev/System One), siehe
+  `docs/superpowers/specs/2026-10-03-decision-model-design.md`.
+
+## 1. Sofortlage (Stand 02.09.2026, historisch)
 
 ```
 Branch:   feature/openai-backend  (14 Commits, gepusht nach origin)

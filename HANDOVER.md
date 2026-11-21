@@ -12,8 +12,8 @@ wo das Projekt steht, was unmittelbar zu tun ist und welche Konventionen gelten.
 - Aktive Entwicklung **hier** (Public-Repo). Das alte Dev-Repo `~/Schreibtisch/Aurora-KDE-Widget` steht seit Juli still.
 - `main` = a569581. `feature/openai-backend` liegt 3 Commits voraus (Reasoning-Anzeige, Effort-Fix, Routinen)
   → **PR #1** offen: https://github.com/sunsetterphoto/niuton-aurora/pull/1
-- **Nachtrag 14.11.2026:** `feature/openai-backend` lokal in `main` gemergt und nach git.snieds.com
-  gepusht (54/54 grün). Haupt-Repo ist git.snieds.com, GitHub nur Spiegel — PR #1 dort nicht mergen.
+- **Nachtrag 14.11.2026:** `feature/openai-backend` lokal in `main` gemergt und ins Haupt-Repo
+  gepusht (54/54 grün). Das Haupt-Repo wird selbst gehostet, GitHub ist nur ein Spiegel — PR #1 dort nicht mergen.
 - **54/54 Tests grün**. Der Build ist nach `~/.local` installiert. Das Widget zeigt ihn erst nach
   `systemctl --user restart plasma-plasmashell.service`.
 - `backup/vor-ip-bereinigung` gelöscht (der Unterschied waren nur echte IPs in zwei Tests).

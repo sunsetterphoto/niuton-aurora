@@ -17,3 +17,6 @@ docs/superpowers/
 # Screenshots / lokale Test-Artefakte
 Tests/
 Bildschirmfoto_*.png
+
+# Lokales Arbeitsprotokoll — nicht Teil des Repos
+WORKLOG.md

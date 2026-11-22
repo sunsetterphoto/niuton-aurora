@@ -186,4 +186,32 @@ TestCase {
         ConfigStore.setValue("openaiEndpoint", "http://127.0.0.1:8080")
         compare(s.backends.length, 2)
     }
+
+    // Cloud-Rechner: ohne Einrichtung aus, Befehle und Dateien bleiben auf diesem Rechner.
+    function test_cloudRechnerDefaults() {
+        compare(s.cloudBoxEndpoint, "")
+        compare(s.sandboxTarget, "device")
+        compare(s.cloudSelected, false)
+        compare(s.cloudBoxKeyRevision, 0)
+        compare(s.toolCloudRunCommand, "auto")
+        compare(s.toolCloudReadFile, "auto")
+        compare(s.toolCloudWriteFile, "auto")
+        compare(s.toolCloudListDir, "auto")
+        compare(s.toolCloudPreview, "auto")
+        compare(s.toolCloudScreenshot, "auto")
+    }
+
+    function test_cloudRechnerReaktiv() {
+        ConfigStore.setValue("cloudBoxEndpoint", "https://aurora.example")
+        ConfigStore.setValue("sandboxTarget", "cloud")
+        compare(s.cloudBoxEndpoint, "https://aurora.example")
+        compare(s.cloudSelected, true)
+        // nur der exakte Wert schaltet um — alles andere bleibt lokal
+        ConfigStore.setValue("sandboxTarget", "Cloud ")
+        compare(s.cloudSelected, false)
+        ConfigStore.setValue("toolCloudRunCommand", "confirm")
+        compare(s.toolCloudRunCommand, "confirm")
+        ConfigStore.setValue("cloudBoxKeyRevision", 3)
+        compare(s.cloudBoxKeyRevision, 3)
+    }
 }

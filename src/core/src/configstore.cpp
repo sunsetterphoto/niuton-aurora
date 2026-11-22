@@ -67,6 +67,22 @@ const QVariantMap &ConfigStore::defaults()
         { QStringLiteral("ragEnabled"),             true },
         { QStringLiteral("ragTopK"),                3 },
         { QStringLiteral("ragThreshold"),           0.75 },
+        // Cloud-Rechner (App-API eines Aurora-Servers): Server-Adresse, leer =
+        // aus. Der Geräte-Schlüssel liegt NIE hier, sondern im KWallet
+        // (KeyRing "cloudbox"); die Revision zählt der Einstellungsdialog bei
+        // jedem Speichern/Löschen hoch, damit laufende Clients neu lesen.
+        { QStringLiteral("cloudBoxEndpoint"),       QString() },
+        { QStringLiteral("cloudBoxKeyRevision"),    0 },
+        // "device" = Befehle und Dateien auf diesem Rechner (bisheriges
+        // Verhalten), "cloud" = ausschließlich im Cloud-Rechner.
+        { QStringLiteral("sandboxTarget"),          QStringLiteral("device") },
+        // Rechte der Cloud-Werkzeuge: der Cloud-Rechner ist isoliert, daher auto.
+        { QStringLiteral("toolCloudRunCommand"),    QStringLiteral("auto") },
+        { QStringLiteral("toolCloudReadFile"),      QStringLiteral("auto") },
+        { QStringLiteral("toolCloudWriteFile"),     QStringLiteral("auto") },
+        { QStringLiteral("toolCloudListDir"),       QStringLiteral("auto") },
+        { QStringLiteral("toolCloudPreview"),       QStringLiteral("auto") },
+        { QStringLiteral("toolCloudScreenshot"),    QStringLiteral("auto") },
     };
     return d;
 }

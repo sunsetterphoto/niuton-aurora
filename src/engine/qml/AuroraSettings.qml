@@ -50,6 +50,19 @@ QtObject {
     property int toolMaxRounds: ConfigStore.value("toolMaxRounds")
     property bool twoPhaseToolCalls: ConfigStore.value("twoPhaseToolCalls")
 
+    // Cloud-Rechner (App-API eines Aurora-Servers). sandboxTarget "cloud"
+    // schaltet Befehle und Dateien vollständig dorthin — ohne Rückfall.
+    property string cloudBoxEndpoint: ConfigStore.value("cloudBoxEndpoint")
+    property int cloudBoxKeyRevision: ConfigStore.value("cloudBoxKeyRevision")
+    property string sandboxTarget: ConfigStore.value("sandboxTarget")
+    readonly property bool cloudSelected: sandboxTarget === "cloud"
+    property string toolCloudRunCommand: ConfigStore.value("toolCloudRunCommand")
+    property string toolCloudReadFile: ConfigStore.value("toolCloudReadFile")
+    property string toolCloudWriteFile: ConfigStore.value("toolCloudWriteFile")
+    property string toolCloudListDir: ConfigStore.value("toolCloudListDir")
+    property string toolCloudPreview: ConfigStore.value("toolCloudPreview")
+    property string toolCloudScreenshot: ConfigStore.value("toolCloudScreenshot")
+
     // Dienste
     property string comfyEndpoint: ConfigStore.value("comfyEndpoint")
     property string comfyEndpointLocal: ConfigStore.value("comfyEndpointLocal")
@@ -140,6 +153,15 @@ QtObject {
         toolManageRoutines = ConfigStore.value("toolManageRoutines")
         toolMaxRounds = ConfigStore.value("toolMaxRounds")
         twoPhaseToolCalls = ConfigStore.value("twoPhaseToolCalls")
+        cloudBoxEndpoint = ConfigStore.value("cloudBoxEndpoint")
+        cloudBoxKeyRevision = ConfigStore.value("cloudBoxKeyRevision")
+        sandboxTarget = ConfigStore.value("sandboxTarget")
+        toolCloudRunCommand = ConfigStore.value("toolCloudRunCommand")
+        toolCloudReadFile = ConfigStore.value("toolCloudReadFile")
+        toolCloudWriteFile = ConfigStore.value("toolCloudWriteFile")
+        toolCloudListDir = ConfigStore.value("toolCloudListDir")
+        toolCloudPreview = ConfigStore.value("toolCloudPreview")
+        toolCloudScreenshot = ConfigStore.value("toolCloudScreenshot")
         comfyEndpoint = ConfigStore.value("comfyEndpoint")
         comfyEndpointLocal = ConfigStore.value("comfyEndpointLocal")
         comfyEnabled = ConfigStore.value("comfyEnabled")

@@ -48,12 +48,18 @@ TestCase {
         verify(head.indexOf("authorization: bearer nk_test") >= 0)
     }
 
-    function test_401_423_429() {
+    function test_401_403_423_429() {
         testServer.respond(401, '{"error":{"code":"unauthorized","message":"Schlüssel ungültig"}}')
         client.status(cb)
         waitResult()
         compare(result.error.status, 401)
         compare(result.error.code, "unauthorized")
+        result = null
+        testServer.respond(403, '{"error":{"code":"box_disabled","message":"abgeschaltet"}}')
+        client.status(cb)
+        waitResult()
+        compare(result.error.status, 403)
+        compare(result.error.code, "box_disabled")
         result = null
         testServer.respond(423, '{"error":{"code":"box_blocked","message":"gesperrt"}}')
         client.list("", cb)

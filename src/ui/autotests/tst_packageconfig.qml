@@ -16,7 +16,7 @@ Item {
 
         function test_alleKcmSeitenLadenOhneFehler() {
             var pages = [ "ConfigGeneral.qml", "ConfigTools.qml", "ConfigModels.qml",
-                          "ConfigModelStore.qml", "ConfigServices.qml",
+                          "ConfigModelStore.qml", "ConfigServices.qml", "ConfigCloud.qml",
                           "ConfigVoice.qml", "ConfigAdvanced.qml" ]
             for (var i = 0; i < pages.length; i++) {
                 pageLoader.source = Qt.resolvedUrl("../../../package/contents/ui/config/" + pages[i])
@@ -24,6 +24,15 @@ Item {
                 verify(pageLoader.item !== null, pages[i] + ": item ist null")
                 pageLoader.source = ""
             }
+        }
+
+        // Eigener Fall für die Cloud-Rechner-Seite, damit ein Ladefehler einer
+        // früheren Seite in der Schleife ihn nicht verdeckt.
+        function test_cloudSeiteLaedt() {
+            pageLoader.source = Qt.resolvedUrl("../../../package/contents/ui/config/ConfigCloud.qml")
+            compare(pageLoader.status, Loader.Ready, "ConfigCloud.qml lädt nicht")
+            verify(pageLoader.item !== null)
+            pageLoader.source = ""
         }
     }
 }

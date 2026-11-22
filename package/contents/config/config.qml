@@ -28,6 +28,11 @@ ConfigModel {
         source: "config/ConfigServices.qml"
     }
     ConfigCategory {
+        name: "Cloud-Rechner"
+        icon: "folder-cloud"
+        source: "config/ConfigCloud.qml"
+    }
+    ConfigCategory {
         name: "Sprache"
         icon: "audio-input-microphone"
         source: "config/ConfigVoice.qml"

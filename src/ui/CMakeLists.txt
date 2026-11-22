@@ -71,4 +71,6 @@ if(BUILD_TESTING)
     # package/-KCM-Seiten lesen ConfigStore — AURORA_CONFIG_PATH gegen die echte rc abschotten
     aurora_ui_qmltest(tst_packageconfig
         "AURORA_CONFIG_PATH=${CMAKE_BINARY_DIR}/tst_packageconfig.rc")
+    aurora_ui_qmltest(tst_cloudsettings
+        "AURORA_CONFIG_PATH=${CMAKE_BINARY_DIR}/tst_cloudsettings.rc")
 endif()

@@ -8,6 +8,8 @@
 #include <QNetworkRequest>
 #include <QSaveFile>
 
+#include <memory>
+
 Http::Http(QObject *parent)
     : QObject(parent)
 {
@@ -219,4 +221,143 @@ void Http::cancelDownload(const QString &url)
 {
     QNetworkReply *reply = m_downloads.take(url);
     if (reply) reply->abort();   // finished feuert danach mit OperationCanceledError
+}
+
+void Http::request(const QVariantMap &options, const QJSValue &callback)
+{
+    const QString url = options.value(QStringLiteral("url")).toString();
+    QByteArray method = options.value(QStringLiteral("method")).toString().toUpper().toUtf8();
+    if (method.isEmpty())
+        method = "GET";
+    const int timeoutMs = options.value(QStringLiteral("timeoutMs")).toInt();
+    const qint64 maxBytes = options.value(QStringLiteral("maxBytes")).toLongLong();
+    const QString saveTo = options.value(QStringLiteral("saveTo")).toString();
+
+    // Body: String = Rohdaten (UTF-8, z.B. Dateiinhalt), Objekt/Array = JSON.
+    const QVariant rawBody = normalizeBody(options.value(QStringLiteral("body")));
+    QByteArray payload;
+    QString contentType = options.value(QStringLiteral("contentType")).toString();
+    const bool hasBody = rawBody.isValid() && !rawBody.isNull();
+    if (hasBody) {
+        if (rawBody.metaType() == QMetaType::fromType<QString>()) {
+            payload = rawBody.toString().toUtf8();
+            if (contentType.isEmpty())
+                contentType = QStringLiteral("application/octet-stream");
+        } else {
+            payload = QJsonDocument::fromVariant(rawBody).toJson(QJsonDocument::Compact);
+            if (contentType.isEmpty())
+                contentType = QStringLiteral("application/json");
+        }
+    }
+
+    QNetworkRequest req{QUrl(url)};
+    req.setTransferTimeout(timeoutMs > 0 ? timeoutMs : m_defaultTimeoutMs);
+    if (!contentType.isEmpty())
+        req.setHeader(QNetworkRequest::ContentTypeHeader, contentType);
+    const QVariantMap headers = options.value(QStringLiteral("headers")).toMap();
+    for (auto it = headers.cbegin(); it != headers.cend(); ++it)
+        req.setRawHeader(it.key().toUtf8(), it.value().toString().toUtf8());
+
+    QNetworkReply *reply = nullptr;
+    if (method == "GET")
+        reply = m_nam.get(req);
+    else if (method == "PUT")
+        reply = m_nam.put(req, payload);       // setzt Content-Length (Server: 411 ohne)
+    else if (method == "POST")
+        reply = m_nam.post(req, payload);
+    else
+        reply = m_nam.sendCustomRequest(req, method, payload);
+
+    // Größenkappe: abbrechen, sobald Content-Length oder der Puffer sie
+    // überschreitet — eine 20-MB-Datei soll nicht erst ganz im Speicher landen.
+    auto tooLarge = std::make_shared<bool>(false);
+    if (maxBytes > 0) {
+        auto check = [reply, maxBytes, tooLarge]() {
+            if (*tooLarge)
+                return;
+            const qint64 announced = reply->header(QNetworkRequest::ContentLengthHeader).toLongLong();
+            if (announced > maxBytes || reply->bytesAvailable() > maxBytes) {
+                *tooLarge = true;
+                reply->abort();
+            }
+        };
+        connect(reply, &QNetworkReply::metaDataChanged, this, check);
+        connect(reply, &QNetworkReply::readyRead, this, check);
+    }
+
+    connect(reply, &QNetworkReply::finished, this, [this, reply, callback, saveTo, tooLarge]() {
+        reply->deleteLater();
+        QVariantMap result;
+        const int status = statusOf(reply);
+        result[QStringLiteral("status")] = status;
+        result[QStringLiteral("contentType")] =
+            reply->header(QNetworkRequest::ContentTypeHeader).toString().section(QLatin1Char(';'), 0, 0).trimmed();
+
+        if (*tooLarge) {
+            result[QStringLiteral("ok")] = false;
+            result[QStringLiteral("error")] = QStringLiteral("too_large");
+            invoke(callback, result);
+            return;
+        }
+        // Wie finishJson: ohne Status oder bei Abbruch kein readAll().
+        if (status == 0 || reply->error() == QNetworkReply::TimeoutError
+            || reply->error() == QNetworkReply::OperationCanceledError) {
+            result[QStringLiteral("ok")] = false;
+            result[QStringLiteral("error")] = errorOf(reply);
+            invoke(callback, result);
+            return;
+        }
+
+        const QByteArray raw = reply->readAll();
+        const bool success = status >= 200 && status < 300;
+        result[QStringLiteral("size")] = raw.size();
+        result[QStringLiteral("head")] = QString::fromLatin1(raw.left(16).toHex());
+
+        // Abgerissen mitten im Body einer 2xx-Antwort: nicht als Erfolg melden.
+        if (success && reply->error() != QNetworkReply::NoError) {
+            result[QStringLiteral("ok")] = false;
+            result[QStringLiteral("error")] = errorOf(reply);
+            invoke(callback, result);
+            return;
+        }
+
+        QJsonParseError parseError;
+        const QJsonDocument doc = QJsonDocument::fromJson(raw, &parseError);
+        const bool isJson = parseError.error == QJsonParseError::NoError && !raw.trimmed().isEmpty();
+
+        if (!success) {
+            result[QStringLiteral("ok")] = false;
+            result[QStringLiteral("error")] = QStringLiteral("HTTP %1").arg(status);
+            if (isJson)
+                result[QStringLiteral("data")] = doc.toVariant();
+            invoke(callback, result);
+            return;
+        }
+
+        if (!saveTo.isEmpty()) {
+            const QFileInfo info(saveTo);
+            QSaveFile file(saveTo);
+            if (!QDir().mkpath(info.absolutePath()) || !file.open(QIODevice::WriteOnly)
+                || file.write(raw) != raw.size() || !file.commit()) {
+                result[QStringLiteral("ok")] = false;
+                result[QStringLiteral("error")] =
+                    QString(QStringLiteral("Datei nicht schreibbar: ") + saveTo);
+                invoke(callback, result);
+                return;
+            }
+            result[QStringLiteral("ok")] = true;
+            result[QStringLiteral("path")] = saveTo;
+            invoke(callback, result);
+            return;
+        }
+
+        const bool binary = raw.left(4096).contains('\0');
+        result[QStringLiteral("ok")] = true;
+        result[QStringLiteral("binary")] = binary;
+        if (!binary)
+            result[QStringLiteral("text")] = QString::fromUtf8(raw);
+        if (isJson)
+            result[QStringLiteral("data")] = doc.toVariant();
+        invoke(callback, result);
+    });
 }

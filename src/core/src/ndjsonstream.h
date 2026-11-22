@@ -55,6 +55,10 @@ private:
     void drainBuffer(bool flush);
     void emitLine(const QByteArray &line);
     void cleanup();
+    // SSE-Antwort mit Fehlerstatus: der Körper ist gewöhnliches JSON (kein
+    // "data:"-Rahmen) und wird am Ende als EIN Objekt gemeldet.
+    bool sseErrorBody() const;
+    void emitErrorBody();
     // QML reicht JS-Objekte als QVariant(QJSValue) durch (kein automatisches
     // Downcast auf QVariantMap bei Q_INVOKABLE-Parametertyp QVariant) —
     // QJsonDocument::fromVariant() kennt QJSValue nicht und liefert sonst {}.
@@ -64,6 +68,7 @@ private:
     QNetworkReply *m_reply = nullptr;
     QTimer m_idleTimer;
     QByteArray m_buffer;
+    QByteArray m_errorBody;
     bool m_timedOut = false;
     bool m_lineTooLong = false;
     int m_idleTimeoutMs = 90000;

@@ -43,6 +43,19 @@ public:
     // ComfyClient._run) verwerfen ihn; geschrieben wird dank QSaveFile nie.
     Q_INVOKABLE void cancelDownload(const QString &url);
 
+    // Generischer Aufruf für APIs jenseits von reinem JSON (Cloud-Rechner-App-API:
+    // Datei-PUT mit rohem Body, Datei-GET als Text, PNG-Antwort in eine Datei).
+    // options: { method ("GET"), url, headers {}, body (String = UTF-8-Rohdaten,
+    //   Objekt/Array = JSON), contentType (Vorgabe: JSON bei Objekt, sonst
+    //   application/octet-stream), timeoutMs (0 = Vorgabe), maxBytes (0 = ohne
+    //   Kappe; mehr -> Abbruch mit error "too_large"), saveTo (Pfad: Antwort bei
+    //   2xx atomar dorthin schreiben statt als Text liefern) }
+    // callback(result): { ok, status, error, data (geparstes JSON, auch bei
+    //   Fehlerstatus), text (UTF-8, nur ohne saveTo und wenn nicht binär), binary
+    //   (NUL-Byte in den ersten 4 KiB), size, contentType, head (erste 16 Bytes
+    //   hex), path (bei saveTo) }
+    Q_INVOKABLE void request(const QVariantMap &options, const QJSValue &callback);
+
 Q_SIGNALS:
     void defaultTimeoutMsChanged();
 

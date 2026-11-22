@@ -2,6 +2,7 @@
 #include <QElapsedTimer>
 #include <QFile>
 #include <QJsonDocument>
+#include <QJsonObject>
 #include <QJsonParseError>
 #include <QQmlEngine>
 #include <QTemporaryDir>
@@ -368,6 +369,183 @@ private Q_SLOTS:
         f.http->getJson(server.baseUrl() + QStringLiteral("/x"), f.callback());
         QCOMPARE(f.wait().value(QStringLiteral("ok")).toBool(), true);
         QVERIFY(!server.lastRequestHead.contains("Authorization"));
+    }
+    // ---------- request(): generischer Aufruf (Cloud-Rechner-App-API) ----------
+
+    // PUT mit rohem Body: Datei-Upload braucht Content-Length (Server: 411 ohne)
+    // und eigenen Content-Type; Header-Namen vergleicht der Test case-insensitiv
+    // (Qt 6.8 schreibt sie klein, Qt 6.11 kanonisch).
+    void request_put_sendetRohenBodyMitLaengeUndHeadern()
+    {
+        TestHttpServer server;
+        server.setResponse(204, "");
+        HttpFixture f;
+        QVariantMap headers;
+        headers["Authorization"] = "Bearer nk_test";
+        f.http->request(QVariantMap{{"method", "PUT"},
+                                    {"url", QString(server.baseUrl() + "/api/v1/box/file?path=a.txt")},
+                                    {"body", QString::fromUtf8("hallo wält")},
+                                    {"contentType", "application/octet-stream"},
+                                    {"headers", headers}},
+                        f.callback());
+        const QVariantMap r = f.wait();
+        QCOMPARE(r.value("ok").toBool(), true);
+        QCOMPARE(r.value("status").toInt(), 204);
+        const QByteArray head = server.lastRequestHead.toLower();
+        QVERIFY(head.startsWith("put /api/v1/box/file?path=a.txt "));
+        QVERIFY(head.contains("authorization: bearer nk_test"));
+        QVERIFY(head.contains("content-type: application/octet-stream"));
+        QVERIFY(head.contains("content-length: 11"));
+        QCOMPARE(server.lastRequestBody, QString::fromUtf8("hallo wält").toUtf8());
+    }
+
+    void request_get_liefertTextGroesseUndKeinBinaer()
+    {
+        TestHttpServer server;
+        server.setResponse(200, "zeile1\nzeile2", "application/octet-stream");
+        HttpFixture f;
+        f.http->request(QVariantMap{{"url", QString(server.baseUrl() + "/f")}}, f.callback());
+        const QVariantMap r = f.wait();
+        QCOMPARE(r.value("ok").toBool(), true);
+        QCOMPARE(r.value("text").toString(), QString("zeile1\nzeile2"));
+        QCOMPARE(r.value("size").toInt(), 13);
+        QCOMPARE(r.value("binary").toBool(), false);
+        QVERIFY(server.lastRequestHead.startsWith("GET /f "));
+    }
+
+    void request_get_binaerWirdErkannt()
+    {
+        TestHttpServer server;
+        server.setResponse(200, QByteArray("ab\0cd", 5), "application/octet-stream");
+        HttpFixture f;
+        f.http->request(QVariantMap{{"url", QString(server.baseUrl() + "/f")}}, f.callback());
+        const QVariantMap r = f.wait();
+        QCOMPARE(r.value("ok").toBool(), true);
+        QCOMPARE(r.value("binary").toBool(), true);
+        QCOMPARE(r.value("size").toInt(), 5);
+        QVERIFY(r.value("text").toString().isEmpty());
+    }
+
+    void request_jsonAntwort_wirdGeparst()
+    {
+        TestHttpServer server;
+        server.setResponse(200, R"({"path":"","entries":[{"name":"a","type":"dir"}]})");
+        HttpFixture f;
+        f.http->request(QVariantMap{{"url", QString(server.baseUrl() + "/files")}}, f.callback());
+        const QVariantMap r = f.wait();
+        QCOMPARE(r.value("ok").toBool(), true);
+        QCOMPARE(r.value("data").toMap().value("entries").toList().first().toMap()
+                     .value("name").toString(), QString("a"));
+    }
+
+    // Zu große Antworten werden abgebrochen statt komplett gepuffert.
+    void request_maxBytes_ueberschritten_liefertTooLarge()
+    {
+        TestHttpServer server;
+        server.setResponse(200, QByteArray(5000, 'x'), "application/octet-stream");
+        HttpFixture f;
+        f.http->request(QVariantMap{{"url", QString(server.baseUrl() + "/f")}, {"maxBytes", 100}},
+                        f.callback());
+        const QVariantMap r = f.wait();
+        QCOMPARE(r.value("ok").toBool(), false);
+        QCOMPARE(r.value("error").toString(), QString("too_large"));
+    }
+
+    // Fehlerform der App-API ({"error":{code,message,retryAfterS}}) kommt als data durch.
+    void request_fehlerstatus_liefertJsonFehlerkoerper()
+    {
+        TestHttpServer server;
+        server.setResponse(429, R"({"error":{"code":"too_many_requests","message":"langsam","retryAfterS":7}})");
+        HttpFixture f;
+        f.http->request(QVariantMap{{"method", "POST"}, {"url", QString(server.baseUrl() + "/x")},
+                                    {"body", QVariantMap{{"a", 1}}}},
+                        f.callback());
+        const QVariantMap r = f.wait();
+        QCOMPARE(r.value("ok").toBool(), false);
+        QCOMPARE(r.value("status").toInt(), 429);
+        QCOMPARE(r.value("error").toString(), QString("HTTP 429"));
+        const QVariantMap err = r.value("data").toMap().value("error").toMap();
+        QCOMPARE(err.value("code").toString(), QString("too_many_requests"));
+        QCOMPARE(err.value("retryAfterS").toInt(), 7);
+    }
+
+    // POST mit JSON-Objekt + saveTo: Body wird JSON, Antwort (PNG) landet atomar in
+    // der Datei; head liefert die ersten Bytes als Hex (Signaturprüfung im Aufrufer).
+    void request_saveTo_schreibtDateiUndHead()
+    {
+        QTemporaryDir dir;
+        const QString dest = dir.path() + "/sub/shot.png";
+        const QByteArray png = QByteArray::fromHex("89504e470d0a1a0a0000000d49484452");
+        TestHttpServer server;
+        server.setResponse(200, png, "image/png");
+        HttpFixture f;
+        f.http->request(QVariantMap{{"method", "POST"}, {"url", QString(server.baseUrl() + "/shot")},
+                                    {"body", QVariantMap{{"url", "http://localhost:5173/"}}},
+                                    {"saveTo", dest}},
+                        f.callback());
+        const QVariantMap r = f.wait();
+        QCOMPARE(r.value("ok").toBool(), true);
+        QCOMPARE(r.value("path").toString(), dest);
+        QCOMPARE(r.value("contentType").toString(), QString("image/png"));
+        QVERIFY(r.value("head").toString().startsWith("89504e47"));
+        QFile file(dest);
+        QVERIFY(file.open(QIODevice::ReadOnly));
+        QCOMPARE(file.readAll(), png);
+        QVERIFY(server.lastRequestHead.toLower().contains("content-type: application/json"));
+        QCOMPARE(QJsonDocument::fromJson(server.lastRequestBody).object().value("url").toString(),
+                 QString("http://localhost:5173/"));
+    }
+
+    void request_saveTo_beiFehlerKeineDatei()
+    {
+        QTemporaryDir dir;
+        const QString dest = dir.path() + "/shot.png";
+        TestHttpServer server;
+        server.setResponse(502, R"({"error":{"code":"screenshot_failed","message":"x"}})");
+        HttpFixture f;
+        f.http->request(QVariantMap{{"method", "POST"}, {"url", QString(server.baseUrl() + "/shot")},
+                                    {"saveTo", dest}},
+                        f.callback());
+        const QVariantMap r = f.wait();
+        QCOMPARE(r.value("ok").toBool(), false);
+        QCOMPARE(r.value("status").toInt(), 502);
+        QCOMPARE(r.value("data").toMap().value("error").toMap().value("code").toString(),
+                 QString("screenshot_failed"));
+        QVERIFY(!QFile::exists(dest));
+    }
+
+    void request_delete_sendetMethode()
+    {
+        TestHttpServer server;
+        server.setResponse(204, "");
+        HttpFixture f;
+        f.http->request(QVariantMap{{"method", "DELETE"}, {"url", QString(server.baseUrl() + "/p")}},
+                        f.callback());
+        QCOMPARE(f.wait().value("ok").toBool(), true);
+        QVERIFY(server.lastRequestHead.startsWith("DELETE /p "));
+    }
+
+    void request_timeout_liefertTimeout()
+    {
+        TestHttpServer server;
+        server.setStallingResponse(200);
+        HttpFixture f;
+        f.http->request(QVariantMap{{"url", QString(server.baseUrl() + "/x")}, {"timeoutMs", 200}},
+                        f.callback());
+        const QVariantMap r = f.wait();
+        QCOMPARE(r.value("ok").toBool(), false);
+        QCOMPARE(r.value("error").toString(), QString("timeout"));
+    }
+
+    void request_verbindungAbgelehnt_status0()
+    {
+        HttpFixture f;
+        f.http->request(QVariantMap{{"url", QString("http://127.0.0.1:%1/x").arg(freierPort())}},
+                        f.callback());
+        const QVariantMap r = f.wait();
+        QCOMPARE(r.value("ok").toBool(), false);
+        QCOMPARE(r.value("status").toInt(), 0);
+        QVERIFY(!r.value("error").toString().isEmpty());
     }
 };
 

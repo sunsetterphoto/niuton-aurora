@@ -344,6 +344,64 @@ private Q_SLOTS:
         QCOMPARE(objects.count(), 1);
         QCOMPARE(objects.at(0).at(0).toMap().value("b").toInt(), 2);
     }
+    // Benannte SSE-Ereignisse (Cloud-Rechner exec: "event: out"/"event: end"):
+    // die event:-Zeilen sind Rahmen, die data:-Zeilen tragen die Objekte.
+    void sseModus_benannteEreignisse_liefernDaten()
+    {
+        TestHttpServer server;
+        server.setResponse(200,
+            "event: out\ndata: {\"stream\":\"stdout\",\"data\":\"hi\\n\"}\n\n"
+            "event: end\ndata: {\"exitCode\":0,\"timedOut\":false,\"truncated\":false}\n\n",
+            "text/event-stream");
+        NdjsonStream stream;
+        stream.setSse(true);
+        QSignalSpy objects(&stream, &NdjsonStream::objectReceived);
+        QSignalSpy finished(&stream, &NdjsonStream::finished);
+        stream.post(server.baseUrl() + "/api/v1/box/exec", QVariantMap());
+        QVERIFY(finished.wait(5000));
+        QCOMPARE(objects.count(), 2);
+        QCOMPARE(objects.at(0).at(0).toMap().value("data").toString(), QString("hi\n"));
+        QCOMPARE(objects.at(1).at(0).toMap().value("exitCode").toInt(), 0);
+        QCOMPARE(finished.first().at(0).toBool(), true);
+    }
+
+    // Fehlerstatus im SSE-Modus: der Server antwortet dann mit einem gewöhnlichen
+    // JSON-Fehlerkörper (ohne "data:"). Der muss als Objekt durchkommen, sonst
+    // kennt der Aufrufer nur "HTTP 423" und nicht code/message/retryAfterS.
+    void sseModus_fehlerstatus_liefertJsonFehlerkoerper()
+    {
+        TestHttpServer server;
+        server.setResponse(423, R"({"error":{"code":"box_blocked","message":"gesperrt"}})");
+        NdjsonStream stream;
+        stream.setSse(true);
+        QSignalSpy objects(&stream, &NdjsonStream::objectReceived);
+        QSignalSpy finished(&stream, &NdjsonStream::finished);
+        stream.post(server.baseUrl() + "/api/v1/box/exec", QVariantMap());
+        QVERIFY(finished.wait(5000));
+        QCOMPARE(objects.count(), 1);
+        QCOMPARE(objects.at(0).at(0).toMap().value("error").toMap().value("code").toString(),
+                 QString("box_blocked"));
+        QCOMPARE(finished.first().at(0).toBool(), false);
+        QCOMPARE(finished.first().at(1).toInt(), 423);
+        QCOMPARE(finished.first().at(2).toString(), QString("HTTP 423"));
+    }
+
+    // Auch ein mehrzeilig formatierter Fehlerkörper ist EIN Objekt.
+    void sseModus_fehlerstatus_mehrzeiligerKoerper()
+    {
+        TestHttpServer server;
+        server.setResponse(429, "{\n  \"error\": {\n    \"code\": \"too_many_requests\",\n"
+                                "    \"retryAfterS\": 3\n  }\n}\n");
+        NdjsonStream stream;
+        stream.setSse(true);
+        QSignalSpy objects(&stream, &NdjsonStream::objectReceived);
+        QSignalSpy finished(&stream, &NdjsonStream::finished);
+        stream.post(server.baseUrl() + "/x", QVariantMap());
+        QVERIFY(finished.wait(5000));
+        QCOMPARE(objects.count(), 1);
+        QCOMPARE(objects.at(0).at(0).toMap().value("error").toMap().value("retryAfterS").toInt(), 3);
+        QCOMPARE(finished.first().at(1).toInt(), 429);
+    }
 };
 
 QTEST_GUILESS_MAIN(TestNdjsonStream)

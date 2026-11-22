@@ -81,6 +81,7 @@ void NdjsonStream::post(const QString &url, const QVariant &body, const QVariant
     m_timedOut = false;
     m_lineTooLong = false;
     m_buffer.clear();
+    m_errorBody.clear();
     m_reply = m_nam.post(req, QJsonDocument::fromVariant(normalizeBody(body)).toJson(QJsonDocument::Compact));
     connect(m_reply, &QNetworkReply::readyRead, this, &NdjsonStream::onReadyRead);
     connect(m_reply, &QNetworkReply::finished, this, &NdjsonStream::onFinished);
@@ -102,6 +103,13 @@ void NdjsonStream::abort()
 void NdjsonStream::onReadyRead()
 {
     m_idleTimer.start(m_idleTimeoutMs); // pro Chunk neu starten
+    if (sseErrorBody()) {
+        // Fehlerkörper sammeln (gekappt), nicht zeilenweise auswerten
+        m_errorBody.append(m_reply->readAll());
+        if (m_errorBody.size() > m_maxLineBytes)
+            m_errorBody.truncate(m_maxLineBytes);
+        return;
+    }
     m_buffer.append(m_reply->readAll());
     drainBuffer(false);
     if (!m_reply)
@@ -121,10 +129,16 @@ void NdjsonStream::onFinished()
     // Nach Timeout-abort() ist das Device bereits geschlossen: readAll() wuerde
     // Qt-intern "device not open" warnen (s. Http::finishJson-Erkenntnis aus Task 2).
     // Bei m_lineTooLong gilt dasselbe — und die zu lange Zeile wird ohnehin verworfen.
-    if (!m_timedOut && !m_lineTooLong)
-        m_buffer.append(reply->readAll());
-    if (!m_lineTooLong)
-        drainBuffer(true);   // kein Flush: die übergroße Restzeile gehoert verworfen
+    if (sseErrorBody()) {
+        if (!m_timedOut)
+            m_errorBody.append(reply->readAll());
+        emitErrorBody();
+    } else {
+        if (!m_timedOut && !m_lineTooLong)
+            m_buffer.append(reply->readAll());
+        if (!m_lineTooLong)
+            drainBuffer(true);   // kein Flush: die übergroße Restzeile gehoert verworfen
+    }
     if (m_reply != reply)
         return; // ein Handler hat abort() ODER post() gerufen: alter Request ist
                 // verworfen, still bleiben (abort() hat cleanup() + deleteLater()
@@ -189,10 +203,27 @@ void NdjsonStream::emitLine(const QByteArray &line)
     Q_EMIT objectReceived(doc.object().toVariantMap());
 }
 
+bool NdjsonStream::sseErrorBody() const
+{
+    if (!m_sse || !m_reply)
+        return false;
+    const int status = m_reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+    return status != 0 && (status < 200 || status >= 300);
+}
+
+void NdjsonStream::emitErrorBody()
+{
+    const QJsonDocument doc = QJsonDocument::fromJson(m_errorBody);
+    m_errorBody.clear();
+    if (doc.isObject())
+        Q_EMIT objectReceived(doc.object().toVariantMap());
+}
+
 void NdjsonStream::cleanup()
 {
     m_idleTimer.stop();
     m_buffer.clear();
+    m_errorBody.clear();
     m_reply = nullptr;
     Q_EMIT activeChanged();
 }

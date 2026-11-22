@@ -9,6 +9,7 @@ ecm_target_qml_sources(auroraengine SOURCES
     qml/ContextCompactor.js
     qml/Commands.js
     qml/ConversationExport.js
+    qml/CloudBoxTexts.js
     qml/AuroraSettings.qml
     qml/OllamaClient.qml
     qml/ChatJob.qml
@@ -41,6 +42,7 @@ ecm_target_qml_sources(auroraengine SOURCES
     qml/VoiceRecorder.qml
     qml/Speaker.qml
     qml/ComfyClient.qml
+    qml/CloudBoxClient.qml
     qml/AuroraEngine.qml
     qml/AuroraController.qml
 )
@@ -117,4 +119,19 @@ if(BUILD_TESTING)
         "AURORA_CONFIG_PATH=${CMAKE_BINARY_DIR}/tst_modelstore.rc")
     aurora_engine_qmltest(tst_servicemanager)
     aurora_engine_qmltest(tst_speachesclient)
+    aurora_engine_qmltest(tst_cloudboxclient)
+
+    # CloudBoxClient gegen den echten Test-HTTP-Server: C++-Harness (QuickTest mit
+    # Setup-Objekt), das den TestHttpServer aus src/core als "testServer" in QML
+    # bereitstellt — so laufen Http/NdjsonStream ungemockt mit.
+    find_package(Qt6 6.6 REQUIRED COMPONENTS QuickTest)
+    add_executable(tst_cloudboxclient_http autotests/tst_cloudboxclient_http.cpp)
+    target_include_directories(tst_cloudboxclient_http PRIVATE ${CMAKE_SOURCE_DIR}/src/core/autotests)
+    target_link_libraries(tst_cloudboxclient_http PRIVATE Qt6::Core Qt6::Qml Qt6::Network Qt6::QuickTest)
+    target_compile_options(tst_cloudboxclient_http PRIVATE
+        -UQT_NO_CAST_FROM_ASCII -UQT_NO_CAST_TO_ASCII -UQT_NO_CAST_FROM_BYTEARRAY -UQT_NO_URL_CAST_FROM_STRING)
+    add_test(NAME tst_cloudboxclient_http COMMAND tst_cloudboxclient_http
+        -input ${CMAKE_CURRENT_SOURCE_DIR}/autotests/tst_cloudboxclient_http.qml
+        -import ${CMAKE_BINARY_DIR}/bin)
+    set_tests_properties(tst_cloudboxclient_http PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 endif()

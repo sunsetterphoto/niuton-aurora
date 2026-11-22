@@ -23,6 +23,8 @@ wo das Projekt steht, was unmittelbar zu tun ist und welche Konventionen gelten.
 - **Neues Feature in Planung:** Entscheidungsmodell (OpenJev/System One), siehe
   `docs/superpowers/specs/2026-10-03-decision-model-design.md`.
 
+- **Nachtrag 22.11.2026:** Zweig `feature/cloud-rechner` — Cloud-Rechner als Sandbox (siehe §9).
+
 ## 1. Sofortlage (Stand 02.09.2026, historisch)
 
 ```
@@ -275,3 +277,65 @@ Hintergrund läuft. Anlegen per Chat („Prüfe den Brent-Preis jeden Tag um 12 
   starten (die restlichen Zuweisungen überschreiben den neuen Zustand) — `Qt.callLater`.
 - Tests: `test_conversationstore.cpp` (Schema/CRUD/Claim/Sweep), `tst_routinescheduler.qml`
   (Zeitplan-Mathe, Claim→Lauf→Buchhaltung, Queues), `tst_sidebar.qml`, `tst_routinedialog.qml`.
+
+---
+
+## 9. Cloud-Rechner als Sandbox — Stand 22.11.2026 (Zweig `feature/cloud-rechner`)
+
+Statt dieses Rechners kann Aurora Befehle und Dateien im **Cloud-Rechner** eines Aurora-Server-Kontos
+ausführen (isolierte Linux-Box je Konto, dieselbe wie im Web). Schnittstelle: App-API des Servers
+(`/api/v1/…`, `Authorization: Bearer nk_…` = Geräte-Schlüssel, im Web unter Einstellungen → Geräte
+erzeugt). Verbindliche Beschreibung: `docs/API.md` §15 im Server-Repo.
+
+**Bausteine:**
+
+- **Core**: `Http.request(options, cb)` — generischer Aufruf (Methode, roher oder JSON-Körper, eigener
+  Content-Type, `maxBytes` → `too_large`, `saveTo` = atomar in Datei bei 2xx, Ergebnis mit `text`,
+  `binary`, `size`, `contentType`, `head` (erste 16 Bytes hex), `data` = geparstes JSON auch bei
+  Fehlerstatus). `NdjsonStream` im SSE-Modus meldet einen Nicht-2xx-Körper jetzt als EIN Objekt
+  (vorher verworfen, weil ohne `data:`-Rahmen).
+- **`CloudBoxClient.qml`** (Engine): alle Aufrufe der App-API; Fehler einheitlich
+  `{status, code, message, retryAfterS}` (eigene Codes `no_key`, `not_configured`, `invalid_endpoint`,
+  `unreachable`, `timeout`, `stream_broken`, `bad_response`). `exec` endet mit GENAU EINEM `onEnd`/`onError`
+  (auch bei Abriss, Leerlauf-Zeitlimit = Befehls-Zeitlimit + 60 s, Fehlerstatus vor dem Strom); Abbruch
+  still. Schlüssel aus `KeyRing` (Eintrag `cloudbox`, Env `AURORA_CLOUDBOX_KEY`), einmal aufgelöst,
+  nach 401/`unauthorized` verworfen.
+- **`CloudBoxTexts.js`**: Werkzeug-Beschreibungen wörtlich aus der gemeinsamen Vorlage der Apps
+  (Mobile-Engine `CloudBoxTexts.kt`), Vorschau-Domain zur Laufzeit aus `me.previewDomain`; einzige
+  Abweichung: `preview` öffnet in KDE im Standard-Browser statt in einer Arbeitsfläche. Fehlertexte
+  fürs Modell (`errorText`) und für die Einstellungsseite (`userMessage`).
+- **Werkzeuge**: `Tool.target` (`any|device|cloud`) + `Tool.definitionFor(ctx)`. Die Registry schaltet
+  **je Werkzeugname** um (`sandboxTarget === "cloud"`): `run_command`, `read_file`, `write_file` →
+  Cloud-Fassung, `list_dir` statt `list_directory`, dazu `preview` und `screenshot`. Lokale Prozess-/
+  Datei-Werkzeuge gibt es im Cloud-Modus nicht — auch nicht als Rückfall. Kategorie `box` zählt in der
+  `CategoryPolicy` zur Netz-Gruppe. Rechte `toolCloud*` (Vorgabe auto; die harte confirm-Klammer gilt nur
+  lokal).
+- **Kontext**: `ctx.cloudBox`, `ctx.imagesDir`, `ctx.openUrl` (nur UI-Engine; Routinen bekommen bei
+  `preview` nur die Adresse), `ctx.appendImage` (Screenshot erscheint wie ein erzeugtes Bild).
+- **Einstellungen**: KCM-Seite `ConfigCloud.qml` („Cloud-Rechner"). ConfigStore-Schlüssel
+  `cloudBoxEndpoint` (leer = aus), `sandboxTarget` (`device`|`cloud`), `cloudBoxKeyRevision` (vom Dialog
+  hochgezählt → Controller liest den Schlüssel neu; der Dialog läuft in eigener Engine), `toolCloud*`.
+  „Cloud-Rechner" nur wählbar mit Adresse + Schlüssel; Löschen eines von beiden fällt auf „dieser
+  Rechner" zurück. Kein eigener Ein/Aus-Schalter (anders als die Android-Fassung): leere Adresse = aus.
+
+**Tests** (neu): `test_http` +11, `test_ndjsonstream` +3, `tst_cloudboxclient` (Mock),
+`tst_cloudboxclient_http` (C++-QuickTest-Harness mit Setup-Objekt: der `TestHttpServer` aus `src/core`
+steht in QML als `testServer` bereit — echter Http/NdjsonStream gegen echten Socket), `tst_tools_cloud`
+(Umschaltung, **kein lokaler Prozess / keine lokale Datei im Cloud-Modus**, Fehler ohne Rückfall,
+Vorschau-Warten, Screenshot), `tst_cloudsettings` (KCM-Seite mit KeyRing-/Http-Attrappe), Ergänzungen
+in `tst_aurorasettings`, `tst_permission`, `tst_chatcontroller_tools`, `tst_auroracontroller`,
+`tst_packageconfig`.
+
+**Gebaut/getestet unter Debian 13 (Qt 6.8, KF 6.13) im Container.** Dort scheitern drei Altlasten,
+die nichts mit dem Cloud-Rechner zu tun haben (unter Fedora/Qt 6.11 grün):
+`test_http::postJson_sendetZusaetzlicheHeader` (Qt 6.8 schreibt Header-Namen klein, der Test vergleicht
+case-sensitiv), `tst_packageconfig::test_alleKcmSeitenLadenOhneFehler` (Qt 6.8 lehnt den Bezeichner
+`short` in `ConfigModels.qml` Z. 96 ab — reserviertes Wort im älteren Parser) und gelegentlich
+`test_processrunner::terminate_wirktAufGanzeProzessgruppe` (Zeitfenster im Container zu knapp).
+
+**Offen / auf einem KDE-Rechner zu prüfen:** echte Seite im Plasma-Einstellungsdialog (Layout,
+Repeater in `FormLayout`), KWallet-Dialog beim ersten Speichern/Lesen von `cloudbox`, „Verbindung
+prüfen" gegen einen echten Server, `Qt.openUrlExternally` der Vorschau-Adresse, Screenshot-Blase im
+Chat, Abbruch eines laufenden Cloud-Befehls über Stopp (ob der Server den Befehl beim Abbau der
+Verbindung beendet, ist in §15 nicht festgelegt).
+

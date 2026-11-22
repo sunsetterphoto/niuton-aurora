@@ -36,6 +36,8 @@ your own cloud storage rank equally; a third-party cloud is the deliberate excep
 - **Audio/music generation** via OpenRouter's free `lyria` models as an explicit chat tool — the
   finished WAV is played back locally (`aplay`) and shown in the chat.
 - **Voice**: speech-to-text via whisper.cpp and text-to-speech via [Piper](https://github.com/rhasspy/piper).
+- **Cloud machine (optional)**: run commands, files, web-app previews and screenshots in the isolated
+  Linux machine of an Aurora server account instead of on your own computer — see below.
 - **Routines** (scheduled autonomous tasks): say *"check the Brent oil price every day at 12:00"*
   and Aurora creates the routine itself (`manage_routines` tool) — or manage them in the sidebar
   section above the chats (both sections collapsible). Due and overdue routines run on their own,
@@ -107,6 +109,31 @@ files: the OpenRouter API key lives in the KWallet (`net.niuton.aurora` folder, 
 org.kde.kwalletd6 D-Bus API), with the `AURORA_OPENROUTER_KEY` environment variable as a
 headless fallback.
 
+### Cloud machine (optional)
+
+Aurora can use the *cloud machine* of an Aurora server account (an isolated Linux box per account,
+the same one the server's web interface uses) as its sandbox. Nothing changes until you set it up.
+
+1. In the server's web interface, open **Settings → Devices**, add a device and copy the device key
+   (`nk_…`, shown only once).
+2. In Aurora, open **Settings → Cloud-Rechner**, enter the server address (e.g.
+   `https://aurora.example`) and the device key, and press **Verbindung prüfen** (check connection) —
+   it shows the account name and tier, or the error.
+3. Choose **Befehle und Dateien: Cloud-Rechner** (commands and files: cloud machine). The option is only
+   available once address and key are set.
+
+In that mode `run_command`, `read_file`, `write_file` and `list_dir` work in the cloud machine (working
+directory `/work`), and two more tools appear: `preview(port, name?)` registers a web app running there,
+waits until its address has a certificate and opens it in your default browser, and `screenshot(url)`
+shows a Chromium screenshot in the chat. The local process and file tools are not available in this
+mode, not even as a fallback: if the server is unreachable or the key was revoked, the model gets a clear
+message and nothing runs on your computer. Cloud tools default to *auto* (the machine is isolated);
+their permissions are on the same settings page.
+
+The device key lives in the KWallet (`cloudbox` entry; `AURORA_CLOUDBOX_KEY` as a headless fallback) and
+never in the config file. The client speaks the server's versioned app API (`/api/v1/me`, `/api/v1/box/…`,
+bearer device key; command output as server-sent events).
+
 ### Ports
 
 | Port | Service |
@@ -121,11 +148,12 @@ headless fallback.
 
 Three QML modules:
 
-- **`net.niuton.aurora.core`** — C++/QML singletons: `FileIO`, `Http`, `NdjsonStream`,
-  `ProcessRunner`, `ConversationStore` (SQLite), `ConfigStore`.
+- **`net.niuton.aurora.core`** — C++/QML singletons: `FileIO`, `Http` (JSON calls plus a generic
+  `request()` for raw bodies, size caps and file downloads), `NdjsonStream` (NDJSON or SSE),
+  `ProcessRunner`, `ConversationStore` (SQLite), `ConfigStore`, `KeyRing` (KWallet).
 - **`net.niuton.aurora.engine`** — `AuroraController` / `AuroraEngine`, `ModelManager`,
   `ChatController`, the backend clients (`OllamaClient`, `OpenAiClient`) and their job objects,
-  prompt/command helpers.
+  `CloudBoxClient` (cloud machine app API), the tools and the prompt/command helpers.
 - **`net.niuton.aurora.ui`** — `Theme`, the views (`ChatView`, `Header`, `Sidebar`, `KnowledgeView`,
   `ImagePanel`, …) and `MainView`.
 

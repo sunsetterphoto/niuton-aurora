@@ -40,6 +40,26 @@ Item {
         }
 
         // Reine State-Setter duerfen keine Seiteneffekte haben (kein Netz/Prozess).
+        // Cloud-Rechner: Client folgt der Einstellung; die UI-Engine bekommt
+        // Client, Bildordner und Browser-Öffner, der Routine-Engine fehlt der Öffner.
+        function test_cloudRechnerVerdrahtung() {
+            compare(controller._cloudBox.endpoint, "")
+            compare(controller._cloudBox.configured, false)
+            ConfigStore.setValue("cloudBoxEndpoint", "https://aurora.example")
+            compare(controller._cloudBox.endpoint, "https://aurora.example")
+            compare(controller._engine.cloudBox, controller._cloudBox)
+            verify(typeof controller._engine.openUrlFn === "function")
+            verify(controller._engine.imagesDir.indexOf("/images") > 0)
+            compare(controller._routines.cloudBox, controller._cloudBox)
+            compare(controller._routines._engine.openUrlFn, null)
+            // neuer Schlüssel aus dem Einstellungsdialog -> Client liest neu
+            controller._cloudBox._keyState = "done"
+            controller._cloudBox._key = "nk_alt"
+            ConfigStore.setValue("cloudBoxKeyRevision", 1)
+            compare(controller._cloudBox._key, "")
+            compare(controller._cloudBox._keyState, "")
+        }
+
         function test_pureStateSetters() {
             controller.setImageMode(true)
             compare(controller.imageMode, true)

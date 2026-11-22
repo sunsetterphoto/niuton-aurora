@@ -269,5 +269,26 @@ Item {
             ctl.thinkingEnabled = false
             ctl.activeCaps = ["tools"]
         }
+
+        // Cloud-Rechner: Client, Bildordner, Browser-Öffner und Bild-Anhängen
+        // kommen über den Werkzeug-Kontext; ohne Einrichtung bleibt cloudBox null.
+        function test_cloudKontextImWerkzeugKontext() {
+            compare(ctl._buildCtx().cloudBox, null)
+            var opened = []
+            var fakeBox = { "configured": true }
+            ctl.cloudBox = fakeBox
+            ctl.imagesDir = "/daten/images"
+            ctl.openUrlFn = function(u) { opened.push(u) }
+            var ctx = ctl._buildCtx()
+            compare(ctx.cloudBox, fakeBox)
+            compare(ctx.imagesDir, "/daten/images")
+            ctx.openUrl("https://einmal.example/x")
+            compare(opened, ["https://einmal.example/x"])
+            ctx.appendImage("/daten/images/cloud-screenshot-1.png", "Screenshot: http://localhost:5173/")
+            compare(ctl.chatModel.count, 1)
+            compare(ctl.chatModel.get(0).mediaPath, "/daten/images/cloud-screenshot-1.png")
+            compare(storeMock.appended[0].mediaType, "image/png")
+            ctl.cloudBox = null; ctl.openUrlFn = null; ctl.imagesDir = ""
+        }
     }
 }

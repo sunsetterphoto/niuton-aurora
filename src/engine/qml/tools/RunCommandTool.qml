@@ -4,6 +4,7 @@ import net.niuton.aurora.engine
 Tool {
     name: "run_command"
     category: "local"
+    target: "device"                  // im Modus „Cloud-Rechner" nicht verfügbar
     permissionKey: "toolRunCommand"
     minPermission: "confirm"          // harte Klammer
     property var _proc: null

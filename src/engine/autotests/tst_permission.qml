@@ -54,6 +54,14 @@ Item {
             policy.noteResult("local")
             compare(policy.needsEscalation("generate"), true)
         }
+        // Cloud-Rechner-Werkzeuge (box) gehören zur Netz-Gruppe: web_search nach
+        // einem Cloud-Befehl eskaliert nicht, ein lokales Werkzeug danach schon.
+        function test_boxCountsAsNetwork() {
+            policy.reset()
+            policy.noteResult("box")
+            compare(policy.needsEscalation("network"), false)
+            compare(policy.needsEscalation("local"), true)
+        }
         function test_confirmSwitchSuppressesForRestOfTurn() {
             policy.reset()
             policy.noteResult("network")

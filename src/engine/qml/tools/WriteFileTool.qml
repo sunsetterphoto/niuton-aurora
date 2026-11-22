@@ -4,6 +4,7 @@ import net.niuton.aurora.engine
 Tool {
     name: "write_file"
     category: "local"
+    target: "device"                  // im Modus „Cloud-Rechner" nicht verfügbar
     permissionKey: "toolWriteFile"
     minPermission: "confirm"          // harte Klammer: nie auto
     definition: ({

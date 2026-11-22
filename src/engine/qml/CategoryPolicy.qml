@@ -8,7 +8,9 @@ QtObject {
     property bool _sawNetwork: false
     property bool _switchConfirmed: false
 
-    function _isNetwork(cat) { return cat === "network" || cat === "generate" }
+    // "box" (Cloud-Rechner) zählt zur Netz-Gruppe: es schickt Daten nach außen,
+    // liest aber nie lokale Dateien.
+    function _isNetwork(cat) { return cat === "network" || cat === "generate" || cat === "box" }
 
     function reset() {
         _sawLocal = false; _sawNetwork = false; _switchConfirmed = false

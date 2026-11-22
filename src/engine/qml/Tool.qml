@@ -12,10 +12,18 @@ QtObject {
     property var definition: ({})            // { type:"function", function:{...} }
     property string permissionKey: ""        // Config-Key der statischen Stufe
     property string minPermission: "auto"    // auto | confirm | off (Untergrenze)
-    property string category: "local"        // local | network | generate
+    property string category: "local"        // local | network | generate | box
+    // Wo das Werkzeug arbeitet: "any" (immer), "device" (nur im Modus „dieser
+    // Rechner") oder "cloud" (nur im Modus „Cloud-Rechner"). Die Registry
+    // schaltet so je Werkzeugname zwischen lokaler und Cloud-Fassung um.
+    property string target: "any"
 
     // Kurzbeschreibung für Chip/Bestätigungs-Bar. Default: der Name.
     function describe(args) { return tool.name }
+
+    // Definition für den Payload; Werkzeuge mit kontextabhängiger Beschreibung
+    // (Cloud-Rechner: Vorschau-Domain) überschreiben dies.
+    function definitionFor(ctx) { return tool.definition }
 
     // Umgebungs-Verfügbarkeit (z.B. ComfyUI erreichbar). Default: immer verfügbar.
     function isAvailable(ctx) { return true }

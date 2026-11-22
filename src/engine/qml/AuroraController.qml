@@ -150,6 +150,9 @@ QtObject {
         reasoningEffort: controller.reasoningEffort
         chatFn: function(req) { return modelManager.chat(req) }
         routines: routineScheduler
+        cloudBox: cloudBoxClient
+        imagesDir: FileIO.standardPath("appData") + "/images"
+        openUrlFn: function(url) { Qt.openUrlExternally(url) }
         // Explizite Bildausgabe über ein OpenRouter-Bildmodell: der Weg ist
         // dem ComfyUI-Pfad nachempfunden (Ausgabe in dieselbe Chat-Blase über
         // appendGeneratedImage, conversationId-Guard gegen falsche Zuordnung).
@@ -269,6 +272,21 @@ QtObject {
         keyRef: "openrouter"
     }
 
+    // ==================== Cloud-Rechner ====================
+    // App-API eines Aurora-Servers. Leere Adresse = nicht eingerichtet; der
+    // Geräte-Schlüssel kommt aus dem KWallet (KeyRing "cloudbox"). Speichert
+    // der Einstellungsdialog (eigene Engine/eigener Prozess) einen neuen
+    // Schlüssel, zählt er cloudBoxKeyRevision hoch — dann hier neu lesen.
+    property CloudBoxClient _cloudBox: CloudBoxClient {
+        id: cloudBoxClient
+        endpoint: settings.cloudBoxEndpoint
+        // http/keyring: Vorgaben des Clients (Core.Http, Core.KeyRing)
+    }
+    property Connections _cloudKeyConn: Connections {
+        target: settings
+        function onCloudBoxKeyRevisionChanged() { cloudBoxClient.resetKey() }
+    }
+
     // ==================== Routinen-Scheduler ====================
     // Eigene AuroraEngine-Instanz: Läufe stören keinen offenen UI-Chat und
     // umgekehrt. Die Bild/Audio-Funktionen unten spiegeln die des UI-Engine,
@@ -284,6 +302,8 @@ QtObject {
         settings: settings
         comfy: comfyClient
         homeDir: FileIO.standardPath("home")
+        cloudBox: cloudBoxClient
+        imagesDir: FileIO.standardPath("appData") + "/images"
         chatFn: function(req) { return modelManager.chat(req) }
         embedFn: function(input, cb) {
             var m = settings.embedModel

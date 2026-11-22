@@ -12,14 +12,29 @@ QtObject {
         ReadFileTool {}, ListDirectoryTool {}, WriteFileTool {},
         WebSearchTool {}, WebFetchTool {}, RunCommandTool {},
         GenerateImageTool {}, GenerateVideoTool {}, GenerateAudioTool {},
-        RoutineTool {}
+        RoutineTool {},
+        CloudRunCommandTool {}, CloudReadFileTool {}, CloudWriteFileTool {},
+        CloudListDirTool {}, CloudPreviewTool {}, CloudScreenshotTool {}
     ]
+
+    // „Befehle und Dateien: Cloud-Rechner" gewählt? Dann gibt es die lokalen
+    // Prozess-/Datei-Werkzeuge nicht — auch nicht als Rückfall —, sondern die
+    // gleichnamigen des Cloud-Rechners. Ohne Einstellung: dieser Rechner.
+    function cloudSelected() {
+        return !!(settings && settings.sandboxTarget === "cloud")
+    }
+
+    function _inMode(t) {
+        if (t.target === "cloud") return cloudSelected()
+        if (t.target === "device") return !cloudSelected()
+        return true
+    }
 
     property var _activeTool: null
 
     function toolByName(name) {
         for (var i = 0; i < allTools.length; i++)
-            if (allTools[i].name === name) return allTools[i]
+            if (allTools[i].name === name && _inMode(allTools[i])) return allTools[i]
         return null
     }
 
@@ -50,9 +65,10 @@ QtObject {
         var out = []
         for (var i = 0; i < allTools.length; i++) {
             var t = allTools[i]
+            if (!_inMode(t)) continue
             if (permissionFor(t.name) === "off") continue
             if (!t.isAvailable(ctx)) continue
-            out.push(t.definition)
+            out.push(t.definitionFor(ctx))
         }
         return out
     }
@@ -65,7 +81,9 @@ QtObject {
     function execute(name, args, ctx, done) {
         var t = toolByName(name)
         if (!t) {
-            done("Unbekanntes Tool: " + name)
+            done(cloudSelected() && _existsLocally(name)
+                 ? "Dieses Werkzeug gibt es im Modus „Cloud-Rechner“ nicht; Dateien und Befehle laufen dort im Cloud-Rechner."
+                 : "Unbekanntes Tool: " + name, { "status": "error" })
             return
         }
         _activeTool = t
@@ -73,6 +91,12 @@ QtObject {
             if (registry._activeTool === t) registry._activeTool = null
             done(text, extra)
         })
+    }
+
+    function _existsLocally(name) {
+        for (var i = 0; i < allTools.length; i++)
+            if (allTools[i].name === name && allTools[i].target === "device") return true
+        return false
     }
 
     function abortRunning() {
@@ -85,9 +109,10 @@ QtObject {
                      "You have tools to interact with the system. Use them proactively:"]
         for (var i = 0; i < allTools.length; i++) {
             var t = allTools[i]
+            if (!_inMode(t)) continue
             if (permissionFor(t.name) === "off") continue
             if (!t.isAvailable(ctx)) continue
-            var fn = t.definition.function
+            var fn = t.definitionFor(ctx).function
             var params = Object.keys((fn.parameters && fn.parameters.properties) || {}).join(", ")
             lines.push("- " + fn.name + "(" + params + "): " + fn.description)
         }

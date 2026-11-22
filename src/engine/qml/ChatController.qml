@@ -38,6 +38,13 @@ QtObject {
     property var audioGenFn: null
     // Geteilter RoutineScheduler: über ctx an manage_routines durchgereicht.
     property var routines: null
+    // Cloud-Rechner (CloudBoxClient) für die Cloud-Werkzeuge; null = nicht
+    // eingerichtet. openUrlFn öffnet eine Vorschau-Adresse im Standard-Browser
+    // (fehlt in Routinen: dann bekommt das Modell nur die Adresse); imagesDir
+    // ist der Ordner für Screenshots.
+    property var cloudBox: null
+    property var openUrlFn: null
+    property string imagesDir: ""
 
     // --- Kontext (Betrieb: an ModelManager gebunden; Test: gesetzt) ---
     property string activeModel: ""
@@ -180,6 +187,11 @@ QtObject {
             // der onFinished-Guard tool-Bilder ebenfalls der richtigen Konversation
             // zuordnet — Fix 2 nach Re-Review).
             "conversationId": ctl.conversationId,
+            // Cloud-Rechner-Werkzeuge (nur im Modus „Cloud-Rechner" aktiv)
+            "cloudBox": ctl.cloudBox,
+            "imagesDir": ctl.imagesDir,
+            "openUrl": ctl.openUrlFn,
+            "appendImage": function(path, label) { ctl.appendGeneratedImage(path, label, true) },
             "newProcess": function() {
                 var p = Qt.createQmlObject('import net.niuton.aurora.core; ProcessRunner {}', ctl)
                 p.maxOutputBytes = 100000     // Parität zur alten main.qml-Fabrik (5b-Handoff)

@@ -39,6 +39,13 @@ ecm_target_qml_sources(auroraengine SOURCES
     qml/tools/GenerateImageTool.qml
     qml/tools/GenerateVideoTool.qml
     qml/tools/GenerateAudioTool.qml
+    qml/tools/CloudBoxTool.qml
+    qml/tools/CloudRunCommandTool.qml
+    qml/tools/CloudReadFileTool.qml
+    qml/tools/CloudWriteFileTool.qml
+    qml/tools/CloudListDirTool.qml
+    qml/tools/CloudPreviewTool.qml
+    qml/tools/CloudScreenshotTool.qml
     qml/VoiceRecorder.qml
     qml/Speaker.qml
     qml/ComfyClient.qml
@@ -120,6 +127,7 @@ if(BUILD_TESTING)
     aurora_engine_qmltest(tst_servicemanager)
     aurora_engine_qmltest(tst_speachesclient)
     aurora_engine_qmltest(tst_cloudboxclient)
+    aurora_engine_qmltest(tst_tools_cloud)
 
     # CloudBoxClient gegen den echten Test-HTTP-Server: C++-Harness (QuickTest mit
     # Setup-Objekt), das den TestHttpServer aus src/core als "testServer" in QML

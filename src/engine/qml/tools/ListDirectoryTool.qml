@@ -4,6 +4,7 @@ import net.niuton.aurora.engine
 Tool {
     name: "list_directory"
     category: "local"
+    target: "device"                  // im Modus „Cloud-Rechner" nicht verfügbar
     permissionKey: "toolListDir"
     definition: ({
         "type": "function",

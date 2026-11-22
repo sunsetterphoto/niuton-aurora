@@ -4,6 +4,7 @@ import net.niuton.aurora.engine
 Tool {
     name: "read_file"
     category: "local"
+    target: "device"                  // im Modus „Cloud-Rechner" nicht verfügbar
     permissionKey: "toolReadFile"
     definition: ({
         "type": "function",

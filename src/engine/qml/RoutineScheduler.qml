@@ -38,6 +38,10 @@ QtObject {
     // ohne ctx.videoGenFn einfach aus.
     property var imageGenFn: null
     property var audioGenFn: null
+    // Cloud-Rechner für Läufe im Modus „Cloud-Rechner" (ohne Browser-Öffner:
+    // eine Vorschau öffnet sich im Hintergrund nicht von selbst).
+    property var cloudBox: null
+    property string imagesDir: ""
 
     // ==================== Beobachtbarer Zustand (UI) ====================
     property var routineList: []             // gemappte Zeilen für die Sidebar
@@ -364,6 +368,8 @@ QtObject {
         embedFn: sched.embedFn
         imageGenFn: sched.imageGenFn
         audioGenFn: sched.audioGenFn
+        cloudBox: sched.cloudBox
+        imagesDir: sched.imagesDir
         routines: sched                          // manage_routines auch aus Routinen heraus
     }
 }

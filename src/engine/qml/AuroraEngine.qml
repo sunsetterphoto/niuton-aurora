@@ -26,6 +26,11 @@ QtObject {
     // Geteilter RoutineScheduler: ctx.routines für manage_routines. null = Tool
     // fehlt im Kontext (schlanke Test-Mocks).
     property var routines: null
+    // Cloud-Rechner: Client, Browser-Öffner (nur UI-Engine) und Bildordner;
+    // reicht an den ChatController für die Cloud-Werkzeuge.
+    property var cloudBox: null
+    property var openUrlFn: null
+    property string imagesDir: ""
     property string homeDir: ""
     property bool thinkingEnabled: false
 
@@ -55,6 +60,9 @@ QtObject {
         videoGenFn: engine.videoGenFn
         audioGenFn: engine.audioGenFn
         routines: engine.routines
+        cloudBox: engine.cloudBox
+        openUrlFn: engine.openUrlFn
+        imagesDir: engine.imagesDir
         activeModel: engine.modelManager ? engine.modelManager.activeModel : ""
         activeCaps: engine.modelManager ? engine.modelManager.activeCaps : []
         isRemote: engine.modelManager ? engine.modelManager.isRemote : false
